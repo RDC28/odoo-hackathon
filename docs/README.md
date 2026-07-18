@@ -8,7 +8,7 @@ Discord-style chat system for talking to each other.
 Sources:
 - Problem statement: [`Carpooling Platform (1).pdf`](../Carpooling%20Platform%20(1).pdf) — the hackathon brief this design must satisfy (see [requirements-mapping.md](requirements-mapping.md) for the checklist)
 - Wireframe: [`Carpooling Platform - 24 hours.svg`](../Carpooling%20Platform%20-%2024%20hours.svg) (Excalidraw, employee app + admin dashboard)
-- Product reference: **BlaBlaCar** — the closest real-world product. We borrow its proven patterns: per-seat pricing, instant booking, driver profile with ratings, recurring commute rides (BlaBlaCar Daily), and in-app rider↔driver messaging — adapted to a closed enterprise context (only verified employees of the same company).
+- Product reference: **BlaBlaCar** — the closest real-world product. We borrow its proven patterns: per-seat pricing, instant booking, driver profile with ratings, recurring commute rides and in-app rider↔driver messaging — adapted to a closed enterprise context (only verified employees of the same company).
 
 ## Stack
 
