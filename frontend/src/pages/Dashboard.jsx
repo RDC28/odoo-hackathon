@@ -1,0 +1,85 @@
+﻿import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
+import * as api from '../api/api'
+import { useAuth } from '../context/AuthContext'
+import Welcome from './Welcome'
+
+export default function Dashboard() {
+  const { user } = useAuth()
+  const [trips, setTrips] = useState([])
+  const [wallet, setWallet] = useState({ balance: 0 })
+  const [offered, setOffered] = useState([])
+
+  useEffect(() => {
+    if (!user.has_onboarded) return
+    api.myBookings(user._id).then(setTrips)
+    api.walletFor(user._id).then(setWallet)
+    api.myOfferedRides(user._id).then(rs => setOffered(rs.filter(r => ['active', 'started', 'in_progress'].includes(r.status))))
+  }, [user._id, user.has_onboarded])
+
+  if (!user.has_onboarded) {
+    return <Welcome />
+  }
+
+  return (
+    <div className="page">
+      <h1>Hello, {user.name.split(' ')[0]} </h1>
+      <p className="muted">Where are you headed today?</p>
+
+      <div className="action-grid">
+        <Link to="/app/find" className="action-card big">
+          <span className="action-emoji"></span>
+          <h3>Find a Ride</h3>
+          <p>Search rides published by your colleagues</p>
+        </Link>
+        <Link to="/app/offer" className="action-card big">
+          <span className="action-emoji"></span>
+          <h3>Offer a Ride</h3>
+          <p>Publish seats in your car or bike</p>
+        </Link>
+      </div>
+
+      <div className="stat-grid">
+        <div className="card stat">
+          <div className="stat-label">Wallet balance</div>
+          <div className="stat-value">₹ {wallet.balance}</div>
+          <Link to="/app/wallet" className="stat-link">Recharge →</Link>
+        </div>
+        <div className="card stat">
+          <div className="stat-label">Upcoming trips</div>
+          <div className="stat-value">{trips.length}</div>
+          <Link to="/app/trips" className="stat-link">My Trips →</Link>
+        </div>
+        <div className="card stat">
+          <div className="stat-label">Rides you're offering</div>
+          <div className="stat-value">{offered.length}</div>
+          <Link to="/app/trips" className="stat-link">Manage →</Link>
+        </div>
+      </div>
+
+      {trips.length > 0 && (
+        <>
+          <h2>Next trip</h2>
+          <Link to={`/app/trips/${trips[0]._id}`} className="card ride-card">
+            <div>
+              <strong>{trips[0].pickup_point.address.split(',')[0]} → {trips[0].drop_point.address.split(',')[0]}</strong>
+              <div className="muted">
+                {new Date(trips[0].ride.departure_at).toLocaleString()} · driver {trips[0].driver && trips[0].driver.name}
+              </div>
+            </div>
+            <span className={'badge ' + badgeClass(trips[0].status)}>{trips[0].status.replace(/_/g, ' ')}</span>
+          </Link>
+        </>
+      )}
+    </div>
+  )
+}
+
+export function badgeClass(status) {
+  if (['booked', 'active'].includes(status)) return 'badge-blue'
+  if (['started', 'in_progress'].includes(status)) return 'badge-amber'
+  if (['completed', 'payment_completed'].includes(status)) return 'badge-green'
+  if (status === 'payment_pending') return 'badge-amber'
+  return 'badge-red'
+}
+
