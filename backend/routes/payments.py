@@ -1,4 +1,10 @@
-from flask import Blueprint, request, jsonify
+import base64
+import hashlib
+import hmac
+import json
+import urllib.error
+import urllib.request
+from flask import Blueprint, request, jsonify, current_app
 from models import db
 from models.booking import Booking
 from models.ride import Ride
@@ -8,6 +14,68 @@ from models.rating import Rating
 from utils.auth_middleware import require_auth
 
 payments_bp = Blueprint('payments', __name__, url_prefix='/api')
+
+
+@payments_bp.route('/payments/razorpay/order', methods=['POST'])
+def create_razorpay_order():
+    """Create a test-mode Razorpay order without exposing the secret key.
+
+    The current frontend uses a local demo database, so this lightweight bridge
+    accepts the booking reference and amount from the demo client. Production
+    should add JWT authorization and resolve the amount from its own booking row.
+    """
+    key_id = current_app.config.get('RAZORPAY_KEY_ID')
+    key_secret = current_app.config.get('RAZORPAY_KEY_SECRET')
+    if not key_id or not key_secret:
+        return jsonify({'error': 'Razorpay keys are not configured on the server'}), 503
+
+    data = request.get_json() or {}
+    try:
+        amount = int(round(float(data.get('amount', 0)) * 100))
+    except (TypeError, ValueError):
+        amount = 0
+    if amount < 100:
+        return jsonify({'error': 'Razorpay amount must be at least ₹1'}), 400
+
+    booking_id = str(data.get('booking_id', ''))
+    receipt = ('ride_' + booking_id.replace('-', ''))[:40] or 'ride_payment'
+    payload = json.dumps({
+        'amount': amount,
+        'currency': 'INR',
+        'receipt': receipt,
+        'notes': {'booking_id': booking_id},
+    }).encode('utf-8')
+    credentials = base64.b64encode(f'{key_id}:{key_secret}'.encode('utf-8')).decode('ascii')
+    req = urllib.request.Request(
+        'https://api.razorpay.com/v1/orders',
+        data=payload,
+        headers={'Content-Type': 'application/json', 'Authorization': f'Basic {credentials}'},
+        method='POST',
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as response:
+            order = json.loads(response.read().decode('utf-8'))
+            # Return only the public key ID alongside the order. The secret
+            # remains server-side and is never sent to the browser.
+            order['key_id'] = key_id
+            return jsonify(order)
+    except (urllib.error.HTTPError, urllib.error.URLError, ValueError) as exc:
+        return jsonify({'error': f'Unable to create Razorpay order: {exc}'}), 502
+
+
+@payments_bp.route('/payments/razorpay/verify', methods=['POST'])
+def verify_razorpay_payment():
+    data = request.get_json() or {}
+    order_id = str(data.get('razorpay_order_id', ''))
+    payment_id = str(data.get('razorpay_payment_id', ''))
+    signature = str(data.get('razorpay_signature', ''))
+    secret = current_app.config.get('RAZORPAY_KEY_SECRET', '')
+    expected = hmac.new(
+        secret.encode('utf-8'), f'{order_id}|{payment_id}'.encode('utf-8'), hashlib.sha256
+    ).hexdigest() if secret else ''
+    if not order_id or not payment_id or not signature or not secret or not hmac.compare_digest(expected, signature):
+        return jsonify({'verified': False, 'error': 'Razorpay signature verification failed'}), 400
+    return jsonify({'verified': True})
 
 
 @payments_bp.route('/payments', methods=['POST'])

@@ -38,7 +38,7 @@ export default function Signup() {
     <div className="auth-page">
       <form className="auth-card" onSubmit={submit}>
         <h2>Create Account</h2>
-        <p className="muted">Join your company's carpooling workspace.</p>
+        <p className="muted">Join your company's Ascend workspace.</p>
         <div className="field"><label>Organization join code</label><input required value={f.joinCode} onChange={set('joinCode')} placeholder="e.g. DEMO01" style={{ textTransform: 'uppercase' }} /></div>
         <div className="field"><label>Full name</label><input required value={f.name} onChange={set('name')} /></div>
         <div className="form-row">

@@ -63,7 +63,10 @@ export default function MyTrips() {
           <div className="btn-row">
             {r.status === 'active' && <button className="btn btn-primary btn-sm" onClick={() => start(r)}>Start Trip</button>}
             {['started', 'in_progress'].includes(r.status) && (
-              <button className="btn btn-primary btn-sm" onClick={() => complete(r)}>Complete Trip</button>
+              <>
+                {r.bookings.length > 0 && <Link className="btn btn-primary btn-sm" to={`/app/trips/${r.bookings[0]._id}/track`}>Open Live Map</Link>}
+                <button className="btn btn-outline btn-sm" onClick={() => complete(r)}>Complete Trip</button>
+              </>
             )}
             {r.status === 'active' && <button className="btn btn-danger btn-sm" onClick={() => cancel(r)}>Cancel Ride</button>}
           </div>

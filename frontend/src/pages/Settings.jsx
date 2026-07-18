@@ -49,7 +49,7 @@ export default function Settings() {
 
       <div className="card">
         <h3>Help & Support</h3>
-        <p className="muted">Questions about carpooling at your company? Ask in the <Link to="/app/chat">#general chat</Link> or contact your admin.</p>
+        <p className="muted">Ride chat is available from an active booking until drop-off. For other questions, contact your admin.</p>
       </div>
     </div>
   )

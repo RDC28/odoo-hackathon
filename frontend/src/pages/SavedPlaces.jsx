@@ -9,44 +9,20 @@ export default function SavedPlaces() {
   const [label, setLabel] = useState('Home')
   const [loc, setLoc] = useState(null)
   const [error, setError] = useState('')
-  const [branches, setBranches] = useState([])
-  const [officeId, setOfficeId] = useState('')
 
   const load = () => api.myPlaces(user._id).then(setPlaces)
   
-  useEffect(() => { 
-    load() 
-    if (user && user.company_id) {
-      api.getCompanyBranches(user.company_id).then(bs => {
-        setBranches(bs)
-        if (bs.length > 0) setOfficeId(bs[0]._id)
-      })
-    }
-  }, [user])
+  useEffect(() => { load() }, [user._id])
 
   async function submit(e) {
     e.preventDefault()
     setError('')
     
-    let placeData = null
-    if (label === 'Office') {
-      if (!officeId) { setError('Select an office branch'); return }
-      const branch = branches.find(b => b._id === officeId)
-      if (!branch) { setError('Invalid branch'); return }
-      placeData = { label: branch.name, address: branch.address, lat: branch.lat, lng: branch.lng }
-    } else {
-      if (!loc) { setError('Pick a location from the suggestions'); return }
-      placeData = { label: label || 'Place', ...loc }
-    }
-
-    // Prevent duplicates by removing any existing place with the same label
-    const existing = places.find(p => p.label.toLowerCase() === placeData.label.toLowerCase())
-    if (existing) {
-      await api.removePlace(existing._id)
-    }
+    if (!loc) { setError('Pick a location from the suggestions'); return }
+    const placeData = { label: label || 'Place', ...loc }
 
     await api.addPlace(user._id, placeData)
-    if (label !== 'Office') setLoc(null)
+    setLoc(null)
     load()
   }
 
@@ -65,22 +41,10 @@ export default function SavedPlaces() {
           </select>
         </div>
 
-        {label === 'Office' ? (
-          <div className="field">
-            <label>Office Branch</label>
-            <select value={officeId} onChange={e => setOfficeId(e.target.value)}>
-              {branches.map(b => (
-                <option key={b._id} value={b._id}>{b.name} - {b.address}</option>
-              ))}
-              {branches.length === 0 && <option value="">No branches found</option>}
-            </select>
-          </div>
-        ) : (
-          <LocationInput label="Location" value={loc} onChange={setLoc} />
-        )}
+        <LocationInput label="Location" value={loc} onChange={setLoc} placeholder="Search an address" />
         
         {error && <div className="error">{error}</div>}
-        <button className="btn btn-primary" type="submit" disabled={label === 'Office' && branches.length === 0}>Save Place</button>
+        <button className="btn btn-primary" type="submit">Save Place</button>
       </form>
 
       {places.map(p => (
@@ -95,4 +59,3 @@ export default function SavedPlaces() {
     </div>
   )
 }
-

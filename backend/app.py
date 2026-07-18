@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from flask import Flask
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
+from sqlalchemy import inspect, text
 from config import Config
 from models import db
 
@@ -56,6 +57,11 @@ def create_app():
     # Create tables
     with app.app_context():
         db.create_all()
+        # Lightweight migration for the existing SQLite demo database.
+        vehicle_columns = {column['name'] for column in inspect(db.engine).get_columns('vehicles')}
+        if 'mileage_kmpl' not in vehicle_columns:
+            db.session.execute(text('ALTER TABLE vehicles ADD COLUMN mileage_kmpl FLOAT NOT NULL DEFAULT 15'))
+            db.session.commit()
 
     @app.route('/api/health', methods=['GET'])
     def health():

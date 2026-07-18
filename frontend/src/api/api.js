@@ -5,9 +5,11 @@
 
 import { col, resetDb } from './db'
 import { haversineKm } from './geo'
+import { seedDemo } from './seed'
 
 const SESSION_KEY = 'carpool_session'
 const WEEKDAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
+const BACKEND_API = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 
 // Re-validates against the DB record (not a caller-supplied object) so a
 // revoked employee's already-open session can't keep booking/publishing/chatting —
@@ -26,6 +28,10 @@ export function currentUser() {
 }
 
 export async function login(email, password) {
+  // Keep the local prototype usable after browser storage is cleared. The
+  // backend has its own seed script, but this frontend currently authenticates
+  // against localStorage until the API swap is enabled.
+  if (col('users').all().length === 0) seedDemo()
   const u = col('users').findOne(
     x => x.email.toLowerCase() === email.trim().toLowerCase() && x.password === password
   )
@@ -91,13 +97,14 @@ export async function myVehicles(uid) {
   return col('vehicles').find(v => v.owner_id === uid)
 }
 
-export async function addVehicle(uid, companyId, { type, model, registration_number, seating_capacity }) {
+export async function addVehicle(uid, companyId, { type, model, registration_number, seating_capacity, mileage_kmpl }) {
   const reg = registration_number.trim().toUpperCase()
   if (col('vehicles').findOne(v => v.company_id === companyId && v.registration_number === reg))
     throw new Error('A vehicle with this registration number is already registered')
   return col('vehicles').insert({
     company_id: companyId, owner_id: uid,
     type, model, registration_number: reg, seating_capacity: +seating_capacity,
+    mileage_kmpl: +(mileage_kmpl || 15),
     status: 'active',
   })
 }
@@ -182,6 +189,20 @@ export async function searchRides(user, { from, to, date, seats }) {
       return { ...r, driver, vehicle }
     })
     .sort((a, b) => a.departure_at.localeCompare(b.departure_at))
+}
+
+// Planned ride origins near the requested pickup. These are not live GPS
+// positions; live tracking remains available only after booking a ride.
+export async function nearbyRides(user, { from, date, seats = 1 }) {
+  const weekday = WEEKDAYS[new Date(date + 'T00:00').getDay()]
+  return col('rides').find(r =>
+    r.company_id === user.company_id &&
+    r.status === 'active' &&
+    r.driver_id !== user._id &&
+    r.seats_available >= +seats &&
+    (sameDay(r.departure_at, date) || (r.recurring_days || []).includes(weekday)) &&
+    haversineKm(r.start_location, from) <= 8
+  ).map(r => ({ ...r, driver: col('users').get(r.driver_id), vehicle: col('vehicles').get(r.vehicle_id) }))
 }
 
 export async function getRide(id) {
@@ -321,6 +342,28 @@ export async function historyFor(uid) {
 // transactions, insert payment, update booking) are not one atomic operation —
 // a real backend must wrap this in a DB transaction so a crash mid-way can't
 // leave a rider debited without the booking marked paid.
+export async function createRazorpayOrder({ booking_id, amount }) {
+  const response = await fetch(`${BACKEND_API}/payments/razorpay/order`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ booking_id, amount }),
+  })
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(data.error || 'Unable to start Razorpay checkout')
+  return data
+}
+
+export async function verifyRazorpayPayment(payload) {
+  const response = await fetch(`${BACKEND_API}/payments/razorpay/verify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok || !data.verified) throw new Error(data.error || 'Payment verification failed')
+  return data
+}
+
 export async function payBooking(bookingId, method) {
   const b = col('bookings').get(bookingId)
   if (!b) throw new Error('Booking not found')
@@ -384,49 +427,46 @@ export async function rateBooking(bookingId, stars) {
 
 // ---------- chat ----------
 
-function ensureGlobal(companyId) {
-  let g = col('conversations').findOne(c => c.type === 'global' && c.company_id === companyId)
-  if (!g) g = col('conversations').insert({
-    company_id: companyId, type: 'global', participant_ids: [],
-    last_message_at: new Date().toISOString(),
-  })
-  return g
-}
-
 export async function getConversations(user) {
-  const global = ensureGlobal(user.company_id)
-  const mine = col('conversations').find(
-    c => c.company_id === user.company_id && c.type !== 'global' && c.participant_ids.includes(user._id)
+  const mine = col('conversations').find(c =>
+    c.company_id === user.company_id &&
+    c.type === 'ride' &&
+    c.participant_ids.includes(user._id) &&
+    (() => {
+      const ride = col('rides').get(c.ride_id)
+      return ride && ['active', 'started', 'in_progress'].includes(ride.status)
+    })()
   )
   const enrich = c => {
-    if (c.type === 'global') return { ...c, title: '# general', subtitle: 'Everyone in your company' }
-    if (c.type === 'dm') {
-      const other = col('users').get(c.participant_ids.find(id => id !== user._id))
-      return { ...c, title: other ? other.name : 'Unknown', subtitle: 'Direct message' }
-    }
     const ride = col('rides').get(c.ride_id)
     const driver = ride ? col('users').get(ride.driver_id) : null
     return {
       ...c,
       title: ride ? `${ride.start_location.address.split(',')[0]} → ${ride.destination_location.address.split(',')[0]}` : 'Ride chat',
       subtitle: driver ? `Ride chat · driver ${driver.name}` : 'Ride chat',
-      closed: ride ? ['completed', 'cancelled'].includes(ride.status) : false,
+      closed: false,
     }
   }
   const sorted = mine.map(enrich).sort((a, b) => (b.last_message_at || '').localeCompare(a.last_message_at || ''))
-  return [enrich(global), ...sorted]
+  return sorted
 }
 
-// A conversation is visible/writable to uid only if they're in the same
-// company AND (it's the shared global channel, or they're a listed participant).
-// Without this, a forged/guessed conversation_id (e.g. via the ?c= chat URL)
-// could read or post into another company's or another employee's conversation.
+// Ride conversations are visible only to the booked rider and driver, and only
+// while the ride is active. There are no organization-wide or standalone DMs.
 function assertConversationAccess(convId, uid) {
   const conv = col('conversations').get(convId)
   if (!conv) throw new Error('Conversation not found')
   const u = col('users').get(uid)
   if (!u || u.company_id !== conv.company_id) throw new Error('Not authorized for this conversation')
-  if (conv.type !== 'global' && !conv.participant_ids.includes(uid)) throw new Error('Not authorized for this conversation')
+  const ride = conv.type === 'ride' ? col('rides').get(conv.ride_id) : null
+  const booking = ride && col('bookings').findOne(b =>
+    b.ride_id === ride._id &&
+    b.status !== 'cancelled' &&
+    (b.rider_id === uid || ride.driver_id === uid)
+  )
+  if (!ride || !booking || !['active', 'started', 'in_progress'].includes(ride.status))
+    throw new Error('This ride chat is only available during an active booking')
+  if (!conv.participant_ids.includes(uid)) throw new Error('Not authorized for this conversation')
   return conv
 }
 
@@ -441,37 +481,9 @@ export async function getMessages(convId, uid) {
 export async function sendMessage(convId, uid, content) {
   requireActive(uid)
   const conv = assertConversationAccess(convId, uid)
-  if (conv.type === 'ride') {
-    const ride = col('rides').get(conv.ride_id)
-    if (ride && ['completed', 'cancelled'].includes(ride.status))
-      throw new Error('This ride chat is closed — the trip has ended')
-  }
   const msg = col('messages').insert({ conversation_id: convId, sender_id: uid, content })
   col('conversations').update(convId, { last_message_at: msg.created_at })
   return msg
-}
-
-export async function startDm(user, otherId) {
-  const freshUser = requireActive(user._id)
-  const other = col('users').get(otherId)
-  if (!other || other.company_id !== freshUser.company_id) throw new Error('Colleague not found in your company')
-  const existing = col('conversations').findOne(
-    c => c.type === 'dm' &&
-      c.participant_ids.includes(freshUser._id) &&
-      c.participant_ids.includes(otherId)
-  )
-  if (existing) return existing
-  return col('conversations').insert({
-    company_id: freshUser.company_id, type: 'dm',
-    participant_ids: [freshUser._id, otherId],
-    last_message_at: new Date().toISOString(),
-  })
-}
-
-export async function listColleagues(user) {
-  return col('users').find(
-    u => u.company_id === user.company_id && u._id !== user._id && u.status === 'active'
-  )
 }
 
 // ---------- admin ----------
@@ -500,13 +512,13 @@ export async function adminListVehicles(companyId) {
     .map(v => ({ ...v, owner: col('users').get(v.owner_id) }))
 }
 
-export async function adminAddVehicle(companyId, { owner_id, type, model, registration_number, seating_capacity }) {
+export async function adminAddVehicle(companyId, { owner_id, type, model, registration_number, seating_capacity, mileage_kmpl }) {
   if (col('vehicles').findOne(v => v.company_id === companyId && v.registration_number.toUpperCase() === registration_number.trim().toUpperCase()))
     throw new Error('A vehicle with this registration number is already registered')
   return col('vehicles').insert({
     company_id: companyId, owner_id, type, model,
     registration_number: registration_number.trim().toUpperCase(),
-    seating_capacity: +seating_capacity, status: 'active',
+    seating_capacity: +seating_capacity, mileage_kmpl: +(mileage_kmpl || 15), status: 'active',
   })
 }
 
@@ -514,18 +526,9 @@ export async function adminSetVehicleStatus(id, status) {
   return col('vehicles').update(id, { status })
 }
 
-// ADMIN SETTINGS & BRANCHES
+// ADMIN SETTINGS
 export async function adminUpdateCompany(companyId, updates) {
   return col('companies').update(companyId, updates)
-}
-export async function getCompanyBranches(companyId) {
-  return col('company_branches').find(b => b.company_id === companyId)
-}
-export async function addCompanyBranch(companyId, branch) {
-  return col('company_branches').insert({ ...branch, company_id: companyId })
-}
-export async function deleteCompanyBranch(branchId) {
-  return col('company_branches').remove(branchId)
 }
 
 export async function adminReports(companyId) {
@@ -534,22 +537,34 @@ export async function adminReports(companyId) {
   const employees = col('users').find(u => u.company_id === companyId)
   const vehicles = col('vehicles').find(v => v.company_id === companyId)
   const rides = col('rides').find(r => r.company_id === companyId)
+  const bookings = col('bookings').find(b => {
+    const ride = col('rides').get(b.ride_id)
+    return ride && ride.company_id === companyId
+  })
   const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0)
   const ridesThisMonth = rides.filter(r => new Date(r.created_at) >= monthStart).length
   const completed = rides.filter(r => r.status === 'completed')
   const totalDistance = completed.reduce((s, r) => s + (r.distance_km || 0), 0)
   const AVG_MILEAGE_KMPL = 15
-  const fuelLiters = totalDistance / AVG_MILEAGE_KMPL
-  const fuelCost = Math.round(fuelLiters * cfg.fuel_cost_per_liter)
+  const fuelCost = Math.round(completed.reduce((sum, ride) => {
+    const vehicle = col('vehicles').get(ride.vehicle_id)
+    return sum + ((ride.distance_km || 0) / (vehicle?.mileage_kmpl || AVG_MILEAGE_KMPL)) * cfg.fuel_cost_per_liter
+  }, 0))
   const vehicleWise = vehicles.map(v => {
     const vr = completed.filter(r => r.vehicle_id === v._id)
     const km = vr.reduce((s, r) => s + (r.distance_km || 0), 0)
     return {
       ...v, owner: col('users').get(v.owner_id),
       trips: vr.length, km: +km.toFixed(1),
-      cost: Math.round((km / AVG_MILEAGE_KMPL) * cfg.fuel_cost_per_liter),
+      cost: Math.round((km / (v.mileage_kmpl || AVG_MILEAGE_KMPL)) * cfg.fuel_cost_per_liter),
     }
   })
+  const activeRides = rides.filter(r => ['active', 'started', 'in_progress'].includes(r.status))
+  const activeSeats = activeRides.reduce((sum, r) => sum + r.seats_available, 0)
+  const sharedSeats = rides.reduce((sum, r) => sum + (r.seats_total - r.seats_available), 0)
+  const paidBookings = bookings.filter(b => b.status === 'payment_completed')
+  const drivers = new Set(rides.map(r => r.driver_id)).size
+  const riders = new Set(bookings.map(b => b.rider_id)).size
   return {
     totalEmployees: employees.length,
     totalVehicles: vehicles.length,
@@ -560,6 +575,14 @@ export async function adminReports(companyId) {
     costPerKm: cfg.cost_per_km,
     utilization: rides.length ? Math.round((completed.length / rides.length) * 100) : 0,
     vehicleWise,
+    totalBookings: bookings.filter(b => b.status !== 'cancelled').length,
+    activeRides: activeRides.length,
+    activeSeats,
+    sharedSeats,
+    drivers,
+    riders,
+    revenue: +paidBookings.reduce((sum, b) => sum + b.fare, 0).toFixed(2),
+    averageFare: paidBookings.length ? +(paidBookings.reduce((sum, b) => sum + b.fare, 0) / paidBookings.length).toFixed(2) : 0,
   }
 }
 
@@ -574,17 +597,26 @@ export async function superadminListOrganizations() {
     return {
       ...c,
       admin_name: admin ? admin.name : 'No Admin',
-      admin_email: admin ? admin.email : 'N/A',
-      employee_count: empCount
+    admin_email: admin ? admin.email : 'N/A',
+      employee_count: empCount,
+      vehicle_count: col('vehicles').find(v => v.company_id === c._id).length,
+      ride_count: col('rides').find(r => r.company_id === c._id).length,
+      status: 'active'
     }
   })
 }
 
 export async function superadminGetStats() {
+  const users = col('users').all()
+  const rides = col('rides').all()
   return {
     total_organizations: col('companies').all().length,
-    total_users: col('users').all().length,
-    total_rides: col('rides').all().length
+    total_users: users.length,
+    total_rides: rides.length,
+    total_vehicles: col('vehicles').all().length,
+    total_bookings: col('bookings').all().length,
+    active_users: users.filter(u => u.status === 'active').length,
+    completed_rides: rides.filter(r => r.status === 'completed').length,
   }
 }
 
@@ -596,7 +628,7 @@ export async function completeOnboarding(data = {}) {
     col('saved_places').insert({ user_id: uid, label: 'Home', address: data.home.address, lat: data.home.lat || 23.0, lng: data.home.lng || 72.0 })
   }
   if (data.office) {
-    col('saved_places').insert({ user_id: uid, label: data.office.label || 'Office', address: data.office.address, lat: data.office.lat || 23.0, lng: data.office.lng || 72.0 })
+    col('saved_places').insert({ user_id: uid, label: 'Office', address: data.office.address, lat: data.office.lat || 23.0, lng: data.office.lng || 72.0 })
   }
 
   return col('users').update(uid, { has_onboarded: true })

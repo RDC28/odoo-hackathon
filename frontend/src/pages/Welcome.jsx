@@ -1,7 +1,9 @@
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import * as api from '../api/api'
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
+import LocationInput from '../components/LocationInput'
+import { geocode } from '../api/geo'
 
 export default function Welcome() {
   const navigate = useNavigate()
@@ -9,31 +11,35 @@ export default function Welcome() {
   const [loading, setLoading] = useState(false)
   
   const [step, setStep] = useState(1)
-  const [branches, setBranches] = useState([])
-  const [home, setHome] = useState('')
-  const [officeId, setOfficeId] = useState('')
+  const [home, setHome] = useState(null)
+  const [office, setOffice] = useState(null)
+  const [companyOffice, setCompanyOffice] = useState(null)
 
   useEffect(() => {
-    if (user && user.company_id) {
-      api.getCompanyBranches(user.company_id).then(bs => {
-        setBranches(bs)
-        if (bs.length > 0) setOfficeId(bs[0]._id)
-      })
-    }
-  }, [user])
+    let mounted = true
+    api.getCompany(user.company_id).then(async company => {
+      if (!company?.registered_address) return
+      try {
+        const [place] = await geocode(company.registered_address)
+        if (mounted) setCompanyOffice(place || { address: company.registered_address, lat: 23.03, lng: 72.58 })
+      } catch {
+        if (mounted) setCompanyOffice({ address: company.registered_address, lat: 23.03, lng: 72.58 })
+      }
+    })
+    return () => { mounted = false }
+  }, [user.company_id])
 
   async function handleCompleteStep1() {
-    if (!home.trim() || !officeId) return
+    if (!home || !office) return
     setStep(2)
   }
 
   async function handleSelect(path) {
     setLoading(true)
     try {
-      const selectedBranch = branches.find(b => b._id === officeId)
       await api.completeOnboarding({
-        home: { address: home },
-        office: { label: selectedBranch.name, address: selectedBranch.address, lat: selectedBranch.lat, lng: selectedBranch.lng }
+        home,
+        office,
       })
       await refresh()
       navigate(path)
@@ -52,30 +58,23 @@ export default function Welcome() {
           <p className="muted" style={{ marginBottom: '2rem', textAlign: 'center' }}>Before we start, let's set up your primary locations.</p>
           
           <div className="field">
-            <label>Home Address</label>
-            <input 
-              placeholder="e.g. 123 Main St, Apartment 4B" 
-              value={home} 
-              onChange={e => setHome(e.target.value)} 
-              required
-            />
+            <LocationInput label="Home address" value={home} onChange={setHome} placeholder="Search your home location" />
           </div>
 
           <div className="field" style={{ marginTop: '1rem' }}>
-            <label>Primary Office Branch</label>
-            <select value={officeId} onChange={e => setOfficeId(e.target.value)} required>
-              {branches.map(b => (
-                <option key={b._id} value={b._id}>{b.name} - {b.address}</option>
-              ))}
-              {branches.length === 0 && <option value="">No branches found</option>}
+            <label>Work address</label>
+            <select value={office ? 'company-office' : ''} onChange={e => setOffice(e.target.value ? companyOffice : null)} disabled={!companyOffice}>
+              <option value="">{companyOffice ? 'Select company workplace' : 'Loading company workplace…'}</option>
+              {companyOffice && <option value="company-office">{companyOffice.address}</option>}
             </select>
+            <div className="loc-hint">Your organization’s assigned workplace address.</div>
           </div>
 
           <button 
             className="btn btn-primary" 
             style={{ width: '100%', marginTop: '2rem' }} 
             onClick={handleCompleteStep1}
-            disabled={!home.trim() || !officeId}
+            disabled={!home || !office}
           >
             Continue
           </button>
@@ -117,4 +116,3 @@ export default function Welcome() {
     </div>
   )
 }
-

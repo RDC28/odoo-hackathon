@@ -26,6 +26,9 @@ def add_vehicle(current_user):
     ).first()
     if existing:
         return jsonify({'error': 'A vehicle with this registration number is already registered'}), 400
+    mileage = float(data.get('mileage_kmpl', 15))
+    if mileage <= 0:
+        return jsonify({'error': 'Mileage must be greater than 0'}), 400
     v = Vehicle(
         company_id=current_user.company_id,
         owner_id=current_user._id,
@@ -33,6 +36,7 @@ def add_vehicle(current_user):
         model=data.get('model', ''),
         registration_number=reg,
         seating_capacity=int(data.get('seating_capacity', 4)),
+        mileage_kmpl=mileage,
     )
     db.session.add(v)
     db.session.commit()

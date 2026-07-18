@@ -17,7 +17,6 @@ class Company(db.Model):
     })
 
     users = db.relationship('User', backref='company', lazy=True)
-    branches = db.relationship('CompanyBranch', backref='company', lazy=True, cascade="all, delete-orphan")
     created_at = db.Column(db.DateTime, default=utcnow)
 
     def to_dict(self):

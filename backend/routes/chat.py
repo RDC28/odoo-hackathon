@@ -1,9 +1,11 @@
 from datetime import datetime, timezone
 from flask import Blueprint, request, jsonify
+from sqlalchemy import or_
 from models import db
 from models.conversation import Conversation, Message
 from models.user import User
 from models.ride import Ride
+from models.booking import Booking
 from utils.auth_middleware import require_auth
 
 chat_bp = Blueprint('chat', __name__, url_prefix='/api')
@@ -12,24 +14,24 @@ chat_bp = Blueprint('chat', __name__, url_prefix='/api')
 @chat_bp.route('/conversations', methods=['GET'])
 @require_auth
 def get_conversations(current_user):
-    # Ensure global channel exists
-    global_conv = Conversation.query.filter_by(
-        company_id=current_user.company_id, type='global'
-    ).first()
-    if not global_conv:
-        global_conv = Conversation(
-            company_id=current_user.company_id, type='global',
-            last_message_at=datetime.now(timezone.utc).isoformat(),
-        )
-        global_conv.participant_ids = []
-        db.session.add(global_conv)
-        db.session.commit()
-
     mine = Conversation.query.filter(
         Conversation.company_id == current_user.company_id,
-        Conversation.type != 'global',
+        Conversation.type == 'ride',
     ).all()
-    mine = [c for c in mine if current_user._id in c.participant_ids]
+    mine = [
+        c for c in mine
+        if current_user._id in c.participant_ids
+        and (ride := Ride.query.get(c.ride_id))
+        and ride.status in ['active', 'started', 'in_progress']
+        and Booking.query.filter(
+            Booking.ride_id == ride._id,
+            Booking.status != 'cancelled',
+            or_(
+                Booking.rider_id == current_user._id,
+                ride.driver_id == current_user._id,
+            ),
+        ).first()
+    ]
 
     def enrich(c):
         d = c.to_dict()
@@ -61,7 +63,7 @@ def get_conversations(current_user):
         key=lambda x: x.get('last_message_at') or '',
         reverse=True
     )
-    return jsonify([enrich(global_conv)] + sorted_mine)
+    return jsonify(sorted_mine)
 
 
 @chat_bp.route('/conversations/<cid>/messages', methods=['GET'])
@@ -101,45 +103,6 @@ def send_message(current_user, cid):
     return jsonify(d), 201
 
 
-@chat_bp.route('/conversations/dm', methods=['POST'])
-@require_auth
-def start_dm(current_user):
-    data = request.get_json()
-    other_id = data.get('other_id')
-    other = User.query.get(other_id)
-    if not other or other.company_id != current_user.company_id:
-        return jsonify({'error': 'Colleague not found in your company'}), 404
-
-    # Check for existing DM
-    existing = Conversation.query.filter_by(
-        type='dm', company_id=current_user.company_id
-    ).all()
-    for c in existing:
-        pids = c.participant_ids
-        if current_user._id in pids and other_id in pids:
-            return jsonify(c.to_dict())
-
-    conv = Conversation(
-        company_id=current_user.company_id, type='dm',
-        last_message_at=datetime.now(timezone.utc).isoformat(),
-    )
-    conv.participant_ids = [current_user._id, other_id]
-    db.session.add(conv)
-    db.session.commit()
-    return jsonify(conv.to_dict()), 201
-
-
-@chat_bp.route('/colleagues', methods=['GET'])
-@require_auth
-def list_colleagues(current_user):
-    colleagues = User.query.filter(
-        User.company_id == current_user.company_id,
-        User._id != current_user._id,
-        User.platform_access == 'granted',
-    ).all()
-    return jsonify([c.to_dict() for c in colleagues])
-
-
 def _assert_access(conv_id, user):
     conv = Conversation.query.get(conv_id)
     if not conv:
@@ -148,7 +111,19 @@ def _assert_access(conv_id, user):
     if user.company_id != conv.company_id:
         from flask import abort
         abort(403, description='Not authorized for this conversation')
-    if conv.type != 'global' and user._id not in conv.participant_ids:
+    ride = Ride.query.get(conv.ride_id) if conv.type == 'ride' else None
+    booking = Booking.query.filter(
+        Booking.ride_id == ride._id if ride else False,
+        Booking.status != 'cancelled',
+        or_(
+            Booking.rider_id == user._id,
+            ride.driver_id == user._id if ride else False,
+        ),
+    ).first() if ride else None
+    if not ride or not booking or ride.status not in ['active', 'started', 'in_progress']:
+        from flask import abort
+        abort(403, description='Ride chat is available only during an active booking')
+    if user._id not in conv.participant_ids:
         from flask import abort
         abort(403, description='Not authorized for this conversation')
     return conv

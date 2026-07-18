@@ -8,6 +8,15 @@ export async function geocode(q) {
   return data.map(r => ({ address: r.display_name, lat: +r.lat, lng: +r.lon }))
 }
 
+export async function reverseGeocode(lat, lng) {
+  const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`
+  const res = await fetch(url, { headers: { Accept: 'application/json' } })
+  if (!res.ok) throw new Error('Unable to resolve that map point')
+  const data = await res.json()
+  if (!data.display_name) throw new Error('No address found for that map point')
+  return { address: data.display_name, lat: +data.lat, lng: +data.lon }
+}
+
 export async function fetchRoute(from, to) {
   const url = `https://router.project-osrm.org/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=full&geometries=geojson`
   const res = await fetch(url)

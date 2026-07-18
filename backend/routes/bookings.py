@@ -21,12 +21,29 @@ def book_ride(current_user):
     ride = Ride.query.get(ride_id)
     if not ride:
         return jsonify({'error': 'This ride no longer exists'}), 404
+    if ride.company_id != current_user.company_id:
+        return jsonify({'error': 'This ride is not available to your organization'}), 403
     if ride.status != 'active':
         return jsonify({'error': 'This ride is no longer available'}), 400
-    if ride.seats_available < seats:
-        return jsonify({'error': 'Not enough seats available'}), 400
-
-    ride.seats_available -= seats
+    # Atomic capacity reservation. Multiple requests may read the same
+    # search result, so the availability check must happen in the UPDATE
+    # itself; only one request can decrement a given remaining seat.
+    reserved = (
+        db.session.query(Ride)
+        .filter(
+            Ride._id == ride_id,
+            Ride.status == 'active',
+            Ride.seats_available >= seats,
+        )
+        .update(
+            {Ride.seats_available: Ride.seats_available - seats},
+            synchronize_session=False,
+        )
+    )
+    if reserved != 1:
+        db.session.rollback()
+        return jsonify({'error': 'Not enough seats available; refresh the ride list'}), 409
+    db.session.refresh(ride)
 
     conv = Conversation(
         company_id=current_user.company_id,
@@ -80,9 +97,18 @@ def cancel_booking(current_user, bid):
     if not b or b.status == 'cancelled':
         return jsonify({'ok': True})
     ride = Ride.query.get(b.ride_id)
-    if ride:
-        ride.seats_available += b.seats_booked
-    b.status = 'cancelled'
+    # Make cancellation idempotent as well: only the request that changes
+    # booked -> cancelled returns the seats to the ride.
+    changed = (
+        db.session.query(Booking)
+        .filter(Booking._id == bid, Booking.status != 'cancelled')
+        .update({Booking.status: 'cancelled'}, synchronize_session=False)
+    )
+    if changed == 1 and ride:
+        db.session.query(Ride).filter(Ride._id == ride._id).update(
+            {Ride.seats_available: Ride.seats_available + b.seats_booked},
+            synchronize_session=False,
+        )
     db.session.commit()
     return jsonify({'ok': True})
 

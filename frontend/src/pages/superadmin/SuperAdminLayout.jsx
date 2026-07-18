@@ -1,6 +1,5 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
-import ThemeToggle from '../../components/ThemeToggle'
 
 export default function SuperAdminLayout() {
   const { user, logout } = useAuth()
@@ -8,8 +7,8 @@ export default function SuperAdminLayout() {
 
   if (!user || user.role !== 'superadmin') {
     return (
-      <div className="layout">
-        <div className="main-content center" style={{ marginTop: '10%' }}>
+      <div className="superadmin-layout">
+        <div className="superadmin-main center" style={{ marginTop: '10%' }}>
           <h2>Access Denied</h2>
           <p>You must be a Super Admin to view this page.</p>
           <button className="btn btn-primary" onClick={() => navigate('/login')}>Back to Login</button>
@@ -19,22 +18,23 @@ export default function SuperAdminLayout() {
   }
 
   return (
-    <div className="layout">
-      <nav className="sidebar">
-        <div className="sidebar-header">
-          <h2>Platform Admin</h2>
-          <p className="muted" style={{ fontSize: '0.8rem' }}>{user.email}</p>
+    <div className="superadmin-layout">
+      <nav className="superadmin-sidebar">
+        <div className="superadmin-sidebar-header">
+          <div className="superadmin-brand"><span className="material-symbols-rounded">hub</span> Ascend</div>
+          <p className="superadmin-label">Platform console</p>
+          <p className="muted superadmin-email">{user.email}</p>
         </div>
-        <div className="sidebar-nav">
-          <NavLink to="/superadmin/overview" className="nav-item">Overview</NavLink>
-          <NavLink to="/superadmin/organizations" className="nav-item">Organizations</NavLink>
+        <div className="superadmin-nav">
+          <p className="superadmin-nav-label">Manage</p>
+          <NavLink to="/superadmin/overview" className={({ isActive }) => 'superadmin-nav-item' + (isActive ? ' active' : '')}><span className="material-symbols-rounded">dashboard</span>Overview</NavLink>
+          <NavLink to="/superadmin/organizations" className={({ isActive }) => 'superadmin-nav-item' + (isActive ? ' active' : '')}><span className="material-symbols-rounded">business</span>Organizations</NavLink>
         </div>
-        <div className="sidebar-footer">
-          <ThemeToggle />
-          <button className="btn btn-outline" style={{ width: '100%', marginTop: '0.5rem' }} onClick={() => { logout(); navigate('/') }}>Logout</button>
+        <div className="superadmin-footer">
+          <button className="btn btn-outline" onClick={() => { logout(); navigate('/') }}><span className="material-symbols-rounded">logout</span>Logout</button>
         </div>
       </nav>
-      <main className="main-content">
+      <main className="superadmin-main">
         <Outlet />
       </main>
     </div>

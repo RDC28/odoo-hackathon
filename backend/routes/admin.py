@@ -1,56 +1,15 @@
 from datetime import datetime
 from flask import Blueprint, request, jsonify
 from werkzeug.security import generate_password_hash
-from models import db, gen_id
+from models import db
 from models.user import User
 from models.vehicle import Vehicle
 from models.ride import Ride
 from models.booking import Booking
 from models.company import Company
-from models.company_branch import CompanyBranch
 from utils.auth_middleware import require_admin
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/api/admin')
-
-
-@admin_bp.route('/companies/<company_id>/branches', methods=['GET'])
-@require_admin
-def get_company_branches(current_user, company_id):
-    if current_user.company_id != company_id:
-        return jsonify({'error': 'Unauthorized'}), 403
-    branches = CompanyBranch.query.filter_by(company_id=company_id).all()
-    return jsonify([b.to_dict() for b in branches])
-
-
-@admin_bp.route('/companies/<company_id>/branches', methods=['POST'])
-@require_admin
-def add_company_branch(current_user, company_id):
-    if current_user.company_id != company_id:
-        return jsonify({'error': 'Unauthorized'}), 403
-    data = request.json
-    branch = CompanyBranch(
-        _id=gen_id(),
-        company_id=company_id,
-        name=data.get('name'),
-        address=data.get('address'),
-        lat=data.get('lat', 23.0),
-        lng=data.get('lng', 72.0)
-    )
-    db.session.add(branch)
-    db.session.commit()
-    return jsonify(branch.to_dict()), 201
-
-
-@admin_bp.route('/companies/<company_id>/branches/<branch_id>', methods=['DELETE'])
-@require_admin
-def delete_company_branch(current_user, company_id, branch_id):
-    if current_user.company_id != company_id:
-        return jsonify({'error': 'Unauthorized'}), 403
-    branch = CompanyBranch.query.filter_by(_id=branch_id, company_id=company_id).first()
-    if branch:
-        db.session.delete(branch)
-        db.session.commit()
-    return jsonify({'ok': True})
 
 
 @admin_bp.route('/employees', methods=['GET'])
@@ -118,6 +77,9 @@ def add_vehicle(current_user):
         registration_number=reg
     ).first():
         return jsonify({'error': 'A vehicle with this registration number is already registered'}), 400
+    mileage = float(data.get('mileage_kmpl', 15))
+    if mileage <= 0:
+        return jsonify({'error': 'Mileage must be greater than 0'}), 400
     v = Vehicle(
         company_id=current_user.company_id,
         owner_id=data.get('owner_id'),
@@ -125,6 +87,7 @@ def add_vehicle(current_user):
         model=data.get('model', ''),
         registration_number=reg,
         seating_capacity=int(data.get('seating_capacity', 4)),
+        mileage_kmpl=mileage,
     )
     db.session.add(v)
     db.session.commit()
@@ -171,6 +134,9 @@ def reports(current_user):
     employees = User.query.filter_by(company_id=current_user.company_id).all()
     vehicles = Vehicle.query.filter_by(company_id=current_user.company_id).all()
     rides = Ride.query.filter_by(company_id=current_user.company_id).all()
+    bookings = Booking.query.join(Ride, Booking.ride_id == Ride._id).filter(
+        Ride.company_id == current_user.company_id
+    ).all()
 
     now = datetime.utcnow()
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -179,8 +145,11 @@ def reports(current_user):
     completed = [r for r in rides if r.status == 'completed']
     total_distance = sum(r.distance_km or 0 for r in completed)
     AVG_MILEAGE = 15
-    fuel_liters = total_distance / AVG_MILEAGE
-    fuel_cost = round(fuel_liters * company.fuel_cost_per_liter)
+    fuel_cost = round(sum(
+        (r.distance_km or 0) / (Vehicle.query.get(r.vehicle_id).mileage_kmpl or AVG_MILEAGE)
+        * company.fuel_cost_per_liter
+        for r in completed
+    ))
 
     vehicle_wise = []
     for v in vehicles:
@@ -192,8 +161,15 @@ def reports(current_user):
             'owner': owner.to_dict() if owner else None,
             'trips': len(vr),
             'km': round(km, 1),
-            'cost': round((km / AVG_MILEAGE) * company.fuel_cost_per_liter),
+            'cost': round((km / (v.mileage_kmpl or AVG_MILEAGE)) * company.fuel_cost_per_liter),
         })
+
+    active_rides = [r for r in rides if r.status in ['active', 'started', 'in_progress']]
+    paid_bookings = [b for b in bookings if b.status == 'payment_completed']
+    shared_seats = sum((r.seats_total - r.seats_available) for r in rides)
+    drivers = len({r.driver_id for r in rides})
+    riders = len({b.rider_id for b in bookings if b.status != 'cancelled'})
+    revenue = sum(b.fare for b in paid_bookings)
 
     return jsonify({
         'totalEmployees': len(employees),
@@ -205,4 +181,12 @@ def reports(current_user):
         'costPerKm': company.cost_per_km,
         'utilization': round((len(completed) / len(rides) * 100) if rides else 0),
         'vehicleWise': vehicle_wise,
+        'totalBookings': len([b for b in bookings if b.status != 'cancelled']),
+        'activeRides': len(active_rides),
+        'activeSeats': sum(r.seats_available for r in active_rides),
+        'sharedSeats': shared_seats,
+        'drivers': drivers,
+        'riders': riders,
+        'revenue': round(revenue, 2),
+        'averageFare': round(revenue / len(paid_bookings), 2) if paid_bookings else 0,
     })

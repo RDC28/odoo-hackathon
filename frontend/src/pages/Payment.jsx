@@ -4,18 +4,30 @@ import * as api from '../api/api'
 import { useAuth } from '../context/AuthContext'
 
 const METHODS = [
+  { id: 'razorpay', icon: 'payments', label: 'Razorpay', note: 'Test mode · Card, UPI, and more' },
   { id: 'cash', icon: 'payments', label: 'Cash Payment', note: 'Pay the driver directly' },
-  { id: 'card', icon: 'credit_card', label: 'Card Payment', note: 'Razorpay test mode (mock)' },
-  { id: 'upi', icon: 'phone_iphone', label: 'UPI Payment', note: 'Razorpay test mode (mock)' },
   { id: 'wallet', icon: 'account_balance_wallet', label: 'Wallet Payment', note: 'Pay from your in-app wallet' },
 ]
+
+const RAZORPAY_KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID || 'rzp_test_TEvb2eePAYtJuU'
+
+function loadRazorpayScript() {
+  if (window.Razorpay) return Promise.resolve()
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script')
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js'
+    script.onload = resolve
+    script.onerror = () => reject(new Error('Razorpay Checkout could not be loaded'))
+    document.body.appendChild(script)
+  })
+}
 
 export default function Payment() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { refresh } = useAuth()
+  const { user, refresh } = useAuth()
   const [b, setB] = useState(null)
-  const [method, setMethod] = useState('wallet')
+  const [method, setMethod] = useState('razorpay')
   const [wallet, setWallet] = useState({ balance: 0 })
   const [error, setError] = useState('')
   const [paid, setPaid] = useState(false)
@@ -35,6 +47,40 @@ export default function Payment() {
     if (paying) return
     setPaying(true)
     setError('')
+    if (method === 'razorpay') {
+      try {
+        await loadRazorpayScript()
+        const order = await api.createRazorpayOrder({ booking_id: b._id, amount: b.fare })
+        const checkout = new window.Razorpay({
+          key: order.key_id || RAZORPAY_KEY_ID,
+          amount: order.amount,
+          currency: order.currency || 'INR',
+          name: 'Ascend',
+          description: 'Ride fare',
+          order_id: order.id,
+          prefill: { name: user?.name || '', email: user?.email || '', contact: user?.phone || '' },
+          theme: { color: '#232323' },
+          handler: async response => {
+            try {
+              await api.verifyRazorpayPayment(response)
+              await api.payBooking(b._id, 'razorpay')
+              refresh()
+              setPaid(true)
+            } catch (err) { setError(err.message) }
+            setPaying(false)
+          },
+        })
+        checkout.on('payment.failed', response => {
+          setError(response.error?.description || 'Razorpay payment failed')
+          setPaying(false)
+        })
+        checkout.open()
+      } catch (err) {
+        setError(err.message)
+        setPaying(false)
+      }
+      return
+    }
     try {
       await api.payBooking(b._id, method)
       refresh()
@@ -89,7 +135,7 @@ export default function Payment() {
         ))}
         {error && <div className="error">{error}</div>}
         <button className="btn btn-primary btn-block" onClick={pay} disabled={paying}>{paying ? 'Processing…' : `Pay ₹ ${b.fare}`}</button>
-        <p className="muted">Prototype: card/UPI simulate a Razorpay Test Mode success instantly — no real money involved.</p>
+          <p className="muted">Razorpay is running in Test Mode. No real money is charged.</p>
       </div>
     </div>
   )

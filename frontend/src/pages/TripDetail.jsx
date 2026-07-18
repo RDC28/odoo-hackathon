@@ -16,6 +16,7 @@ export default function TripDetail() {
 
   const canTrack = b.ride && ['started', 'in_progress'].includes(b.ride.status)
   const needsPayment = ['payment_pending'].includes(b.status)
+  const chatAvailable = b.ride && ['active', 'started', 'in_progress'].includes(b.ride.status)
 
   return (
     <div className="page reference-page">
@@ -29,8 +30,8 @@ export default function TripDetail() {
         <MapView
           polyline={b.ride && b.ride.route_coords}
           markers={[
-            { lat: b.pickup_point.lat, lng: b.pickup_point.lng, label: 'Pickup: ' + b.pickup_point.address.split(',')[0] },
-            { lat: b.drop_point.lat, lng: b.drop_point.lng, label: 'Drop: ' + b.drop_point.address.split(',')[0] },
+            { id: 'pickup', lat: b.pickup_point.lat, lng: b.pickup_point.lng, kind: 'pickup', label: 'Pickup: ' + b.pickup_point.address.split(',')[0] },
+            { id: 'drop', lat: b.drop_point.lat, lng: b.drop_point.lng, kind: 'drop', label: 'Drop: ' + b.drop_point.address.split(',')[0] },
           ]}
           height={260}
         />
@@ -51,7 +52,7 @@ export default function TripDetail() {
           <div><span className="muted">Registration</span><br /><strong>{b.vehicle ? b.vehicle.registration_number : '—'}</strong></div>
         </div>
         <div className="btn-row">
-          <Link className="btn btn-outline" to={`/app/chat?c=${b.conversation_id}`}> Chat with Driver</Link>
+          {chatAvailable && <Link className="btn btn-outline" to={`/app/chat?c=${b.conversation_id}`}>Chat with Driver</Link>}
           {b.driver && <a className="btn btn-outline" href={`tel:${b.driver.phone}`}> Call Driver</a>}
         </div>
       </div>

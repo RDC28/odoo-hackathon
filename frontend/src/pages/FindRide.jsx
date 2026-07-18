@@ -5,6 +5,7 @@ import { fetchRoute } from '../api/geo'
 import { useAuth } from '../context/AuthContext'
 import LocationInput from '../components/LocationInput'
 import MapView from '../components/MapView'
+import RoutePicker from '../components/RoutePicker'
 
 function Stars({ avg, count }) {
   if (!count) return <span className="muted">no ratings yet</span>
@@ -22,6 +23,7 @@ export default function FindRide() {
   const [seats, setSeats] = useState(1)
 
   const [route, setRoute] = useState(null)
+  const [nearby, setNearby] = useState([])
   const [results, setResults] = useState(null)
   const [step, setStep] = useState('form') // form | confirm | results
   const [error, setError] = useState('')
@@ -35,7 +37,12 @@ export default function FindRide() {
     if (!from || !to) { setError('Select both locations from the suggestions'); return }
     setLoading(true)
     try {
-      setRoute(await fetchRoute(from, to))
+      const [routeData, nearbyRides] = await Promise.all([
+        fetchRoute(from, to),
+        api.nearbyRides(user, { from, date, seats }),
+      ])
+      setRoute(routeData)
+      setNearby(nearbyRides)
       setStep('confirm')
     } catch (err) { setError(err.message) }
     setLoading(false)
@@ -45,6 +52,7 @@ export default function FindRide() {
     setError('')
     const rides = await api.searchRides(user, { from, to, date, seats })
     setResults(rides)
+    setNearby(rides)
     setStep('results')
   }
 
@@ -64,6 +72,7 @@ export default function FindRide() {
         <form className="card form" onSubmit={preview}>
           <LocationInput label="Start location" value={from} onChange={setFrom} savedPlaces={places} placeholder="Enter your location" />
           <LocationInput label="Destination location" value={to} onChange={setTo} savedPlaces={places} placeholder="Enter drop location" />
+          <RoutePicker from={from} to={to} setFrom={setFrom} setTo={setTo} />
           <div className="form-row">
             <div className="field"><label>Travel date</label><input type="date" value={date} onChange={e => setDate(e.target.value)} /></div>
             <div className="field"><label>Seats needed</label><input type="number" min={1} max={6} value={seats} onChange={e => setSeats(+e.target.value)} /></div>
@@ -83,9 +92,17 @@ export default function FindRide() {
             markers={[
               { lat: from.lat, lng: from.lng, label: 'Pickup' },
               { lat: to.lat, lng: to.lng, label: 'Destination' },
+              ...nearby.map(r => ({
+                id: `nearby-${r._id}`,
+                lat: r.start_location.lat,
+                lng: r.start_location.lng,
+                label: `Available driver · ${r.driver?.name || 'Driver'} · ${r.vehicle?.model || 'Vehicle'}`,
+                car: true,
+              })),
             ]}
             height={340}
           />
+          {nearby.length > 0 && <p className="muted nearby-note"><span className="material-symbols-rounded">directions_car</span> {nearby.length} available driver{nearby.length === 1 ? '' : 's'} near your pickup point</p>}
           <div className="route-stats">
             <span> {route.distance_km} km</span>
             <span>⏱ ~{route.duration_min} min</span>

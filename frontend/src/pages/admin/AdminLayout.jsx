@@ -17,20 +17,23 @@ export default function AdminLayout() {
   return (
     <div className="admin">
       <header className="admin-header">
-        <div>
-          <strong> {company.name}</strong>
-          <span className="join-chip">Join code: {company.join_code}</span>
-        </div>
-        <div className="btn-row">
-          <button className="btn btn-outline btn-sm" onClick={() => navigate('/app')}>Employee App</button>
-          <button className="btn btn-outline btn-sm" onClick={() => { logout(); navigate('/') }}>Logout</button>
+        <div className="admin-shell admin-header-inner">
+          <div>
+            <strong>{company.name}</strong>
+            <span className="join-chip">Join code: {company.join_code}</span>
+          </div>
+          <div className="btn-row">
+            <button className="btn btn-outline btn-sm" onClick={() => { logout(); navigate('/') }}>Logout</button>
+          </div>
         </div>
       </header>
       <nav className="admin-tabs">
-        <NavLink end to="/admin" className={tabClass}>Overview</NavLink>
-        <NavLink to="/admin/employees" className={tabClass}>Employees</NavLink>
-        <NavLink to="/admin/vehicles" className={tabClass}>Vehicles</NavLink>
-        <NavLink to="/admin/settings" className={tabClass}>Settings</NavLink>
+        <div className="admin-shell admin-tabs-inner">
+          <NavLink end to="/admin" className={tabClass}>Overview</NavLink>
+          <NavLink to="/admin/employees" className={tabClass}>Employees</NavLink>
+          <NavLink to="/admin/vehicles" className={tabClass}>Vehicles</NavLink>
+          <NavLink to="/admin/settings" className={tabClass}>Settings</NavLink>
+        </div>
       </nav>
       <main className="admin-main">
         <Outlet context={{ company, setCompany }} />

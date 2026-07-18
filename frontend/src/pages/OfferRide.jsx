@@ -5,6 +5,7 @@ import { fetchRoute } from '../api/geo'
 import { useAuth } from '../context/AuthContext'
 import LocationInput from '../components/LocationInput'
 import MapView from '../components/MapView'
+import RoutePicker from '../components/RoutePicker'
 
 const DAYS = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su']
 
@@ -29,8 +30,17 @@ export default function OfferRide() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
+  const selectedVehicle = vehicles.find(v => v._id === vehicleId)
+  const seatLimit = selectedVehicle ? selectedVehicle.seating_capacity : 1
+
   useEffect(() => {
-    api.myVehicles(user._id).then(vs => { setVehicles(vs); if (vs[0]) setVehicleId(vs[0]._id) })
+    api.myVehicles(user._id).then(vs => {
+      setVehicles(vs)
+      if (vs[0]) {
+        setVehicleId(vs[0]._id)
+        setSeats(current => Math.min(Math.max(1, current), vs[0].seating_capacity))
+      }
+    })
     api.myPlaces(user._id).then(setPlaces)
     api.getCompany(user.company_id).then(setCompany)
   }, [user._id, user.company_id])
@@ -41,6 +51,12 @@ export default function OfferRide() {
 
   function swap() {
     const a = from; setFrom(to); setTo(a)
+  }
+
+  function changeVehicle(id) {
+    setVehicleId(id)
+    const vehicle = vehicles.find(v => v._id === id)
+    if (vehicle) setSeats(current => Math.min(Math.max(1, current), vehicle.seating_capacity))
   }
 
   async function preview(e) {
@@ -95,19 +111,24 @@ export default function OfferRide() {
         <form className="card form" onSubmit={preview}>
           <div className="field">
             <label>Vehicle</label>
-            <select value={vehicleId} onChange={e => setVehicleId(e.target.value)}>
-              {vehicles.map(v => <option key={v._id} value={v._id}>{v.model} · {v.registration_number}</option>)}
+            <select value={vehicleId} onChange={e => changeVehicle(e.target.value)}>
+              {vehicles.map(v => <option key={v._id} value={v._id}>{v.model} · {v.registration_number} · {v.mileage_kmpl || 15} km/l · {v.seating_capacity} seats</option>)}
             </select>
           </div>
           <LocationInput label="Start location" value={from} onChange={setFrom} savedPlaces={places} placeholder="Enter your location" />
           <button type="button" className="btn btn-outline btn-sm swap-btn" onClick={swap}>⇅ Swap</button>
           <LocationInput label="Destination location" value={to} onChange={setTo} savedPlaces={places} placeholder="Enter drop location" />
+          <RoutePicker from={from} to={to} setFrom={setFrom} setTo={setTo} />
           <div className="form-row">
             <div className="field"><label>Date</label><input type="date" value={date} onChange={e => setDate(e.target.value)} /></div>
             <div className="field"><label>Time</label><input type="time" value={time} onChange={e => setTime(e.target.value)} /></div>
           </div>
           <div className="form-row">
-            <div className="field"><label>Available seats</label><input type="number" min={1} max={8} value={seats} onChange={e => setSeats(+e.target.value)} /></div>
+            <div className="field">
+              <label>Available seats <span className="field-note">(excluding driver)</span></label>
+              <input type="number" min={1} max={seatLimit} value={Math.min(seats, seatLimit)} onChange={e => setSeats(Math.min(+e.target.value, seatLimit))} />
+              <div className="loc-hint">Up to {seatLimit} passenger seat{seatLimit === 1 ? '' : 's'} for this vehicle.</div>
+            </div>
             <div className="field"><label>Fare per seat (₹)</label><input type="number" min={0} value={fare} onChange={e => setFare(e.target.value)} placeholder="auto-suggested after route" /></div>
           </div>
           <div className="field">

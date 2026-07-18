@@ -2,9 +2,19 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
+const DEMO_SHORTCUTS = [
+  { label: 'Odoo Admin', role: 'admin', email: 'admin@demo.com', password: 'demo123' },
+  { label: 'Odoo Driver', role: 'employee', email: 'raj@demo.com', password: 'demo123' },
+  { label: 'Odoo Rider', role: 'employee', email: 'priya@demo.com', password: 'demo123' },
+  { label: 'Acme Admin', role: 'admin', email: 'admin@acme01.com', password: 'demo123' },
+  { label: 'Acme Driver', role: 'employee', email: 'maya@acme01.com', password: 'demo123' },
+  { label: 'Acme Rider', role: 'employee', email: 'rohan@acme01.com', password: 'demo123' },
+  { label: 'Super Admin', role: 'superadmin', email: 'superadmin@platform.com', password: 'superadmin123' },
+]
+
 export default function Login() {
   const navigate = useNavigate()
-  const { login, logout } = useAuth()
+  const { login } = useAuth()
   const [role, setRole] = useState('employee')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -33,9 +43,11 @@ export default function Login() {
 
   return (
     <div className="auth-page">
-      <form className="auth-card" onSubmit={submit}>
+      <form className="auth-card login-card" onSubmit={submit}>
+        <div className="auth-mark"><span className="material-symbols-rounded">lock_open</span></div>
+        <p className="eyebrow">Ascend account access</p>
         <h2>Welcome back</h2>
-        <p className="muted">Login to continue to Carpool.</p>
+        <p className="muted">Login to continue to Ascend.</p>
         <div className="role-tabs">
           <button type="button" className={`role-tab ${role === 'employee' ? 'active' : ''}`} onClick={() => setRole('employee')}>Employee</button>
           <button type="button" className={`role-tab ${role === 'admin' ? 'active' : ''}`} onClick={() => setRole('admin')}>Org Admin</button>
@@ -51,22 +63,20 @@ export default function Login() {
           Don't have an account? <Link to="/signup">Sign up</Link>
         </p>
 
-        <div style={{ marginTop: '3rem', paddingTop: '1rem', borderTop: '1px solid var(--border)' }}>
-          <p className="muted center" style={{ fontSize: '0.8rem', marginBottom: '1rem' }}>Demo Quick Logins</p>
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'center' }}>
-            <button type="button" className="btn btn-outline" style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem' }} 
-              onClick={() => { setRole('employee'); setEmail('raj@demo.com'); setPassword('demo123'); }}>
-              Demo Employee
-            </button>
-            <button type="button" className="btn btn-outline" style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem' }}
-              onClick={() => { setRole('admin'); setEmail('admin@demo.com'); setPassword('demo123'); }}>
-              Demo Org Admin
-            </button>
-            <button type="button" className="btn btn-outline" style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem' }}
-              onClick={() => { setRole('superadmin'); setEmail('superadmin@platform.com'); setPassword('superadmin123'); }}>
-              Demo Super Admin
-            </button>
-          </div>
+        <div className="demo-login-picker">
+          <label htmlFor="demo-account">Demo account shortcut</label>
+          <select id="demo-account" defaultValue="" onChange={e => {
+            const shortcut = DEMO_SHORTCUTS.find(item => item.email === e.target.value)
+            if (!shortcut) return
+            setRole(shortcut.role)
+            setEmail(shortcut.email)
+            setPassword(shortcut.password)
+            setError('')
+          }}>
+            <option value="">Choose a demo account</option>
+            {DEMO_SHORTCUTS.map(shortcut => <option key={shortcut.email} value={shortcut.email}>{shortcut.label} · {shortcut.email}</option>)}
+          </select>
+          <p className="muted">Selecting an account fills the login form for you.</p>
         </div>
       </form>
     </div>

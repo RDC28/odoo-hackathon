@@ -8,7 +8,7 @@ export default function AdminVehicles() {
   const [rows, setRows] = useState([])
   const [employees, setEmployees] = useState([])
   const [adding, setAdding] = useState(false)
-  const [f, setF] = useState({ owner_id: '', type: 'car', model: '', registration_number: '', seating_capacity: 4 })
+  const [f, setF] = useState({ owner_id: '', type: 'car', model: '', registration_number: '', seating_capacity: 4, mileage_kmpl: 15 })
   const [error, setError] = useState('')
 
   const load = () => api.adminListVehicles(companyId).then(setRows)
@@ -34,7 +34,7 @@ export default function AdminVehicles() {
     if (!f.owner_id) { setError('Select the employee this vehicle belongs to'); return }
     try {
       await api.adminAddVehicle(companyId, f)
-      setF({ owner_id: employees[0] ? employees[0]._id : '', type: 'car', model: '', registration_number: '', seating_capacity: 4 })
+      setF({ owner_id: employees[0] ? employees[0]._id : '', type: 'car', model: '', registration_number: '', seating_capacity: 4, mileage_kmpl: 15 })
       setAdding(false)
       load()
     } catch (err) { setError(err.message) }
@@ -75,6 +75,7 @@ export default function AdminVehicles() {
             <div className="field"><label>Registration number</label><input required value={f.registration_number} onChange={set('registration_number')} placeholder="GJ01AB1234" /></div>
           </div>
           <div className="field"><label>Seating capacity (excluding driver)</label><input required type="number" min={1} max={10} value={f.seating_capacity} onChange={set('seating_capacity')} /></div>
+          <div className="field"><label>Fuel efficiency (km/l)</label><input required type="number" min={1} max={100} step="0.1" value={f.mileage_kmpl} onChange={set('mileage_kmpl')} /></div>
           {error && <div className="error">{error}</div>}
           <button className="btn btn-primary" type="submit">Save Vehicle</button>
         </form>
@@ -82,14 +83,15 @@ export default function AdminVehicles() {
 
       <div className="card">
         <table className="table">
-          <thead><tr><th>Registration</th><th>Model</th><th>Seats</th><th>Owner</th><th>Status</th><th></th></tr></thead>
+          <thead><tr><th>Registration</th><th>Model</th><th>Seats</th><th>Efficiency</th><th>Owner</th><th>Status</th><th></th></tr></thead>
           <tbody>
-            {rows.length === 0 && <tr><td colSpan={6} className="muted">No vehicles registered yet.</td></tr>}
+            {rows.length === 0 && <tr><td colSpan={7} className="muted">No vehicles registered yet.</td></tr>}
             {rows.map(v => (
               <tr key={v._id}>
                 <td>{v.registration_number}</td>
                 <td>{v.model}</td>
                 <td>{v.seating_capacity}</td>
+                <td>{v.mileage_kmpl || 15} km/l</td>
                 <td>{v.owner ? v.owner.name : '—'}</td>
                 <td><span className={'badge ' + (v.status === 'active' ? 'badge-green' : 'badge-red')}>{v.status}</span></td>
                 <td><button className="btn btn-outline btn-sm" onClick={() => toggle(v)}>{v.status === 'active' ? 'Deactivate' : 'Activate'}</button></td>

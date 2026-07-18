@@ -6,7 +6,7 @@ export default function MyVehicle() {
   const { user } = useAuth()
   const [vehicles, setVehicles] = useState([])
   const [adding, setAdding] = useState(false)
-  const [f, setF] = useState({ type: 'car', model: '', registration_number: '', seating_capacity: 4 })
+  const [f, setF] = useState({ type: 'car', model: '', registration_number: '', seating_capacity: 4, mileage_kmpl: 15 })
   const [error, setError] = useState('')
 
   const load = () => api.myVehicles(user._id).then(setVehicles)
@@ -28,7 +28,7 @@ export default function MyVehicle() {
     setError('')
     try {
       await api.addVehicle(user._id, user.company_id, f)
-      setF({ type: 'car', model: '', registration_number: '', seating_capacity: 4 })
+      setF({ type: 'car', model: '', registration_number: '', seating_capacity: 4, mileage_kmpl: 15 })
       setAdding(false)
       load()
     } catch (err) { setError(err.message) }
@@ -58,6 +58,7 @@ export default function MyVehicle() {
             <div className="field"><label>Registration number</label><input required value={f.registration_number} onChange={set('registration_number')} placeholder="GJ01AB1234" /></div>
             <div className="field"><label>Seating capacity (excluding you)</label><input required type="number" min={1} max={10} value={f.seating_capacity} onChange={set('seating_capacity')} /></div>
           </div>
+          <div className="field"><label>Fuel efficiency (km/l)</label><input required type="number" min={1} max={100} step="0.1" value={f.mileage_kmpl} onChange={set('mileage_kmpl')} /><div className="loc-hint">Use the vehicle’s usual real-world mileage.</div></div>
           {error && <div className="error">{error}</div>}
           <button className="btn btn-primary" type="submit">Save Vehicle</button>
         </form>
@@ -71,7 +72,7 @@ export default function MyVehicle() {
         <div key={v._id} className="card ride-card">
           <div>
             <strong>{v.type === 'bike' ? '' : ''} {v.model}</strong>
-            <div className="muted">{v.registration_number} · {v.seating_capacity} seats · {v.status}</div>
+            <div className="muted">{v.registration_number} · {v.seating_capacity} seats · {v.mileage_kmpl || 15} km/l · {v.status}</div>
           </div>
           <button className="btn btn-danger btn-sm" onClick={() => remove(v)}>Remove</button>
         </div>

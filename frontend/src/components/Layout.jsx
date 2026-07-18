@@ -1,6 +1,5 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import ThemeToggle from './ThemeToggle'
 
 const links = [
   { to: '/app', label: 'Dashboard', icon: 'home', end: true },
@@ -22,7 +21,7 @@ export default function Layout() {
   return (
     <div className="layout">
       <aside className="sidebar">
-        <div className="brand"><span className="material-symbols-rounded">directions_car</span> Carpool</div>
+        <div className="brand"><span className="material-symbols-rounded">directions_car</span> Ascend</div>
         <nav>
           {links.map(l => (
             <NavLink key={l.to} to={l.to} end={l.end} className={({ isActive }) => 'nav-link' + (isActive ? ' active' : '')}>
@@ -38,7 +37,6 @@ export default function Layout() {
               <div className="user-sub">{user.department}</div>
             </div>
           </div>
-          <ThemeToggle />
           {user.role === 'admin' && (
             <button className="btn btn-outline btn-sm" onClick={() => navigate('/admin')}>Admin Dashboard</button>
           )}
