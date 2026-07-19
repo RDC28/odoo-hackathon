@@ -5,13 +5,11 @@ import json
 import urllib.error
 import urllib.request
 from flask import Blueprint, request, jsonify, current_app
-from models import db
-from models.booking import Booking
-from models.ride import Ride
-from models.user import User
-from models.payment import Payment, WalletTransaction
-from models.rating import Rating
-from models.review import ReviewFeedback
+from pymongo import DESCENDING
+from models import db, serialize, serialize_many
+from models.payment import new_payment, new_wallet_transaction
+from models.rating import new_rating
+from models.review import new_review_feedback
 from utils.auth_middleware import require_auth
 
 payments_bp = Blueprint('payments', __name__, url_prefix='/api')
@@ -90,62 +88,61 @@ def pay_booking(current_user):
     data = request.get_json()
     booking_id = data.get('booking_id')
     method = data.get('method', 'cash')
-    b = Booking.query.get(booking_id)
+    b = db.bookings.find_one({'_id': booking_id})
     if not b:
         return jsonify({'error': 'Booking not found'}), 404
-    if b.status == 'payment_completed':
+    if b['status'] == 'payment_completed':
         return jsonify({'ok': True})
 
-    ride = Ride.query.get(b.ride_id)
-    rider = User.query.get(b.rider_id)
+    ride = db.rides.find_one({'_id': b['ride_id']})
+    rider = db.users.find_one({'_id': b['rider_id']})
 
     if method == 'wallet':
-        if rider.wallet_balance < b.fare:
+        if rider['wallet_balance'] < b['fare']:
             return jsonify({'error': 'Insufficient wallet balance — recharge first'}), 400
-        rider.wallet_balance -= b.fare
-        db.session.add(WalletTransaction(
-            user_id=rider._id, type='debit', amount=b.fare,
-            balance_after=rider.wallet_balance, reference='ride payment',
+        new_balance = rider['wallet_balance'] - b['fare']
+        db.users.update_one({'_id': rider['_id']}, {'$set': {'wallet_balance': new_balance}})
+        db.wallet_transactions.insert_one(new_wallet_transaction(
+            user_id=rider['_id'], type='debit', amount=b['fare'],
+            balance_after=new_balance, reference='ride payment',
         ))
 
     if method != 'cash' and ride:
-        driver = User.query.get(ride.driver_id)
+        driver = db.users.find_one({'_id': ride['driver_id']})
         if driver:
-            driver.wallet_balance += b.fare
-            db.session.add(WalletTransaction(
-                user_id=driver._id, type='credit', amount=b.fare,
-                balance_after=driver.wallet_balance, reference='ride earnings',
+            driver_balance = driver['wallet_balance'] + b['fare']
+            db.users.update_one({'_id': driver['_id']}, {'$set': {'wallet_balance': driver_balance}})
+            db.wallet_transactions.insert_one(new_wallet_transaction(
+                user_id=driver['_id'], type='credit', amount=b['fare'],
+                balance_after=driver_balance, reference='ride earnings',
             ))
 
-    db.session.add(Payment(
-        booking_id=booking_id, user_id=b.rider_id,
-        amount=b.fare, method=method,
+    db.payments.insert_one(new_payment(
+        booking_id=booking_id, user_id=b['rider_id'],
+        amount=b['fare'], method=method,
     ))
-    b.status = 'payment_completed'
-    db.session.commit()
+    db.bookings.update_one({'_id': booking_id}, {'$set': {'status': 'payment_completed'}})
     return jsonify({'ok': True})
 
 
 @payments_bp.route('/wallet/<uid>', methods=['GET'])
 @require_auth
 def wallet_for(current_user, uid):
-    user = User.query.get(uid)
-    txns = WalletTransaction.query.filter_by(user_id=uid).order_by(
-        WalletTransaction.created_at.desc()
-    ).all()
+    user = db.users.find_one({'_id': uid})
+    txns = db.wallet_transactions.find({'user_id': uid}).sort('created_at', DESCENDING)
     return jsonify({
-        'balance': user.wallet_balance if user else 0,
-        'transactions': [t.to_dict() for t in txns],
+        'balance': user['wallet_balance'] if user else 0,
+        'transactions': serialize_many(txns),
     })
 
 
 @payments_bp.route('/wallet/<uid>/transactions', methods=['GET'])
 @require_auth
 def transaction_history(current_user, uid):
-    if uid != current_user._id:
+    if uid != current_user['_id']:
         return jsonify({'error': 'You can only view your own transactions'}), 403
-    txns = WalletTransaction.query.filter_by(user_id=uid).order_by(WalletTransaction.created_at.desc()).all()
-    return jsonify([t.to_dict() for t in txns])
+    txns = db.wallet_transactions.find({'user_id': uid}).sort('created_at', DESCENDING)
+    return jsonify(serialize_many(txns))
 
 
 @payments_bp.route('/wallet/<uid>/recharge', methods=['POST'])
@@ -154,17 +151,26 @@ def recharge_wallet(current_user, uid):
     data = request.get_json()
     amount = float(data.get('amount', 0))
     method = data.get('method', 'upi')
-    user = User.query.get(uid)
+    user = db.users.find_one({'_id': uid})
     if not user:
         return jsonify({'error': 'User not found'}), 404
-    user.wallet_balance += amount
-    db.session.add(WalletTransaction(
+    new_balance = user['wallet_balance'] + amount
+    db.users.update_one({'_id': uid}, {'$set': {'wallet_balance': new_balance}})
+    db.wallet_transactions.insert_one(new_wallet_transaction(
         user_id=uid, type='credit', amount=amount,
-        balance_after=user.wallet_balance,
+        balance_after=new_balance,
         reference=f'wallet recharge ({method})',
     ))
-    db.session.commit()
-    return jsonify({'balance': user.wallet_balance})
+    return jsonify({'balance': new_balance})
+
+
+def _bump_driver_rating(driver_id, stars):
+    driver = db.users.find_one({'_id': driver_id})
+    if not driver:
+        return
+    count = driver['rating_count'] + 1
+    avg = round(((driver['rating_avg'] * driver['rating_count']) + stars) / count, 1)
+    db.users.update_one({'_id': driver_id}, {'$set': {'rating_avg': avg, 'rating_count': count}})
 
 
 @payments_bp.route('/ratings', methods=['POST'])
@@ -173,23 +179,17 @@ def rate_booking(current_user):
     data = request.get_json()
     booking_id = data.get('booking_id')
     stars = int(data.get('stars', 0))
-    b = Booking.query.get(booking_id)
+    b = db.bookings.find_one({'_id': booking_id})
     if not b:
         return jsonify({'ok': True})
-    ride = Ride.query.get(b.ride_id)
+    ride = db.rides.find_one({'_id': b['ride_id']})
     if not ride:
         return jsonify({'ok': True})
-    db.session.add(Rating(
-        booking_id=booking_id, rater_id=b.rider_id,
-        ratee_id=ride.driver_id, stars=stars,
+    db.ratings.insert_one(new_rating(
+        booking_id=booking_id, rater_id=b['rider_id'],
+        ratee_id=ride['driver_id'], stars=stars,
     ))
-    driver = User.query.get(ride.driver_id)
-    if driver:
-        count = driver.rating_count + 1
-        avg = round(((driver.rating_avg * driver.rating_count) + stars) / count, 1)
-        driver.rating_avg = avg
-        driver.rating_count = count
-    db.session.commit()
+    _bump_driver_rating(ride['driver_id'], stars)
     return jsonify({'ok': True})
 
 
@@ -202,40 +202,42 @@ def review_booking(current_user):
     comment = str(data.get('comment', '')).strip()[:500]
     if not 1 <= stars <= 5:
         return jsonify({'error': 'A review must be between 1 and 5 stars'}), 400
-    booking = Booking.query.get(booking_id)
-    if not booking or booking.rider_id != current_user._id:
+    booking = db.bookings.find_one({'_id': booking_id})
+    if not booking or booking['rider_id'] != current_user['_id']:
         return jsonify({'error': 'Review is only available to the passenger'}), 403
-    if booking.status != 'payment_completed':
+    if booking['status'] != 'payment_completed':
         return jsonify({'error': 'Complete payment before reviewing this ride'}), 400
-    existing = ReviewFeedback.query.filter_by(booking_id=booking_id).first()
+    existing = db.review_feedback.find_one({'booking_id': booking_id})
     if existing:
-        return jsonify(existing.to_dict())
-    ride = Ride.query.get(booking.ride_id)
+        return jsonify(serialize(existing))
+    ride = db.rides.find_one({'_id': booking['ride_id']})
     if not ride:
         return jsonify({'error': 'Ride not found'}), 404
-    review = ReviewFeedback(booking_id=booking_id, rater_id=current_user._id, ratee_id=ride.driver_id, stars=stars, comment=comment)
-    db.session.add(review)
-    driver = User.query.get(ride.driver_id)
-    if driver:
-        count = driver.rating_count + 1
-        driver.rating_avg = round(((driver.rating_avg * driver.rating_count) + stars) / count, 1)
-        driver.rating_count = count
-    db.session.commit()
-    return jsonify(review.to_dict()), 201
+    review = new_review_feedback(
+        booking_id=booking_id, rater_id=current_user['_id'],
+        ratee_id=ride['driver_id'], stars=stars, comment=comment,
+    )
+    db.review_feedback.insert_one(review)
+    _bump_driver_rating(ride['driver_id'], stars)
+    return jsonify(serialize(review)), 201
 
 
 @payments_bp.route('/reviews/driver/<uid>', methods=['GET'])
 @require_auth
 def driver_reviews(current_user, uid):
-    if uid != current_user._id:
+    if uid != current_user['_id']:
         return jsonify({'error': 'You can only view your own driver feedback'}), 403
-    driver = User.query.get(uid)
+    driver = db.users.find_one({'_id': uid})
     reviews = []
-    for rating in Rating.query.filter_by(ratee_id=uid).order_by(Rating.created_at.desc()).all():
-        rater = User.query.get(rating.rater_id)
-        reviews.append({**rating.to_dict(), 'comment': '', 'rater': {'name': rater.name} if rater else None})
-    for review in ReviewFeedback.query.filter_by(ratee_id=uid).order_by(ReviewFeedback.created_at.desc()).all():
-        rater = User.query.get(review.rater_id)
-        reviews.append({**review.to_dict(), 'rater': {'name': rater.name} if rater else None})
+    for rating in db.ratings.find({'ratee_id': uid}).sort('created_at', DESCENDING):
+        rater = db.users.find_one({'_id': rating['rater_id']})
+        reviews.append({**serialize(rating), 'comment': '', 'rater': {'name': rater['name']} if rater else None})
+    for review in db.review_feedback.find({'ratee_id': uid}).sort('created_at', DESCENDING):
+        rater = db.users.find_one({'_id': review['rater_id']})
+        reviews.append({**serialize(review), 'rater': {'name': rater['name']} if rater else None})
     reviews.sort(key=lambda item: item.get('created_at') or '', reverse=True)
-    return jsonify({'average': driver.rating_avg if driver else 0, 'count': driver.rating_count if driver else 0, 'reviews': reviews})
+    return jsonify({
+        'average': driver['rating_avg'] if driver else 0,
+        'count': driver['rating_count'] if driver else 0,
+        'reviews': reviews,
+    })

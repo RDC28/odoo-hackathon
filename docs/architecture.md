@@ -9,7 +9,7 @@ flowchart LR
   Browser --> Geo[Nominatim + OSRM]
   Browser --> Razor[Flask payment endpoints]
   Razor --> RZP[Razorpay Test Mode]
-  Backend[Flask + SQLAlchemy API] --> SQL[(SQLite/Postgres compatible DB)]
+  Backend[Flask + PyMongo API] --> Mongo[(Local MongoDB)]
 ```
 
 The frontend is a single React application with route guards for employee,

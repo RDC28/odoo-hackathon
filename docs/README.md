@@ -20,7 +20,7 @@ workspace; the platform super admin manages organization access.
 
 ```text
 frontend/   React + Vite employee, organization-admin, and super-admin prototype
-backend/    Flask + SQLAlchemy API, reports, payments, and atomic booking route
+backend/    Flask + PyMongo (MongoDB) API, reports, payments, and atomic booking route
 docs/       Product, architecture, data, API, and demo documentation
 ```
 

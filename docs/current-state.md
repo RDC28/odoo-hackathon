@@ -55,9 +55,10 @@ It does not expose tenant-level employee or ride editing.
 Vehicle seating capacity excludes the driver. A ride cannot publish more seats
 than the vehicle allows, and booking seats cannot exceed the remaining capacity.
 The browser mock updates localStorage for the demo. The Flask backend implements
-the real concurrency boundary: `UPDATE rides SET seats_available = seats_available
-- :seats WHERE id = :ride_id AND seats_available >= :seats`, followed by booking
-creation in the same transaction. A failed update returns HTTP 409.
+the real concurrency boundary: an atomic MongoDB
+`update_one({_id, status: 'active', seats_available: {$gte: seats}}, {$inc:
+{seats_available: -seats}})`, followed by booking creation. A failed update
+returns HTTP 409.
 
 For production, add an idempotency key to booking requests, payment-hold expiry,
 database indexes, and WebSocket/SSE availability updates. See the concurrency

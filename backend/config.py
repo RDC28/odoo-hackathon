@@ -13,8 +13,8 @@ if _env_file.exists():
 class Config:
     SECRET_KEY = os.environ.get('SECRET_KEY', 'carpool-hackathon-secret-2026')
     JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY', 'carpool-jwt-secret-2026')
-    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL', 'sqlite:///carpool.db')
-    SQLALCHEMY_TRACK_MODIFICATIONS = False
+    MONGO_URI = os.environ.get('MONGO_URI', 'mongodb://localhost:27017')
+    MONGO_DB_NAME = os.environ.get('MONGO_DB_NAME', 'carpool')
     JWT_ACCESS_TOKEN_EXPIRES = 86400  # 24 hours
     RAZORPAY_KEY_ID = os.environ.get('RAZORPAY_KEY_ID', '')
     RAZORPAY_KEY_SECRET = os.environ.get('RAZORPAY_KEY_SECRET', '')

@@ -8,7 +8,7 @@ from flask import Flask
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 from config import Config
-from models import db  # importing models also registers every table with SQLAlchemy
+from models import ensure_indexes
 
 
 def create_app():
@@ -18,7 +18,6 @@ def create_app():
     # Extensions
     CORS(app, supports_credentials=True)
     JWTManager(app)
-    db.init_app(app)
 
     # Register blueprints. Each blueprint declares its own url_prefix.
     from routes.auth import auth_bp
@@ -36,9 +35,9 @@ def create_app():
                payments_bp, chat_bp, places_bp, admin_bp, superadmin_bp]:
         app.register_blueprint(bp)
 
-    # Create tables that don't exist yet (run `python seed.py` for demo data)
-    with app.app_context():
-        db.create_all()
+    # MongoDB needs no schema, but the unique indexes back the app's
+    # duplicate-email / join-code / one-review-per-booking guarantees.
+    ensure_indexes()
 
     @app.route('/api/health', methods=['GET'])
     def health():

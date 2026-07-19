@@ -1,10 +1,8 @@
 from datetime import datetime
 from flask import Blueprint, request, jsonify
-from models import db
-from models.ride import Ride
-from models.vehicle import Vehicle
-from models.booking import Booking
-from models.user import User
+from pymongo import DESCENDING
+from models import db, serialize
+from models.ride import new_ride
 from utils import haversine_km
 from utils.auth_middleware import require_auth
 
@@ -15,51 +13,49 @@ WEEKDAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
 
 def _enrich_ride(ride):
     """Ride dict + its driver and vehicle details (for ride cards in the UI)."""
-    d = ride.to_dict()
-    driver = User.query.get(ride.driver_id)
-    vehicle = Vehicle.query.get(ride.vehicle_id)
-    d['driver'] = driver.to_dict() if driver else None
-    d['vehicle'] = vehicle.to_dict() if vehicle else None
+    d = serialize(ride)
+    driver = db.users.find_one({'_id': ride['driver_id']})
+    vehicle = db.vehicles.find_one({'_id': ride['vehicle_id']})
+    d['driver'] = serialize(driver)
+    d['vehicle'] = serialize(vehicle)
     return d
 
 
 def _set_ride_and_bookings(ride_id, ride_status, booking_status, skip_booking_statuses):
     """Move a ride and its bookings to a new status (skipping some bookings)."""
-    ride = Ride.query.get(ride_id)
+    ride = db.rides.find_one({'_id': ride_id})
     if not ride:
         return
-    ride.status = ride_status
-    query = Booking.query.filter(Booking.ride_id == ride_id)
+    db.rides.update_one({'_id': ride_id}, {'$set': {'status': ride_status}})
+    booking_filter = {'ride_id': ride_id}
     if skip_booking_statuses:
-        query = query.filter(~Booking.status.in_(skip_booking_statuses))
-    for b in query.all():
-        b.status = booking_status
-    db.session.commit()
+        booking_filter['status'] = {'$nin': skip_booking_statuses}
+    db.bookings.update_many(booking_filter, {'$set': {'status': booking_status}})
 
 
 @rides_bp.route('', methods=['POST'])
 @require_auth
 def publish_ride(current_user):
     data = request.get_json()
-    vehicles = Vehicle.query.filter_by(owner_id=current_user._id).all()
+    vehicles = list(db.vehicles.find({'owner_id': current_user['_id']}))
     if not vehicles:
         return jsonify({'error': 'Register a vehicle before publishing a ride'}), 400
-    vehicle = next((v for v in vehicles if v._id == data.get('vehicle_id')), None)
+    vehicle = next((v for v in vehicles if v['_id'] == data.get('vehicle_id')), None)
     if not vehicle:
         return jsonify({'error': 'Select one of your registered vehicles'}), 400
     seats = int(data.get('seats', 0))
     if seats < 1:
         return jsonify({'error': 'Available seats must be at least 1'}), 400
-    if seats > vehicle.seating_capacity:
-        return jsonify({'error': f'{vehicle.model} only seats {vehicle.seating_capacity}'}), 400
+    if seats > vehicle['seating_capacity']:
+        return jsonify({'error': f"{vehicle['model']} only seats {vehicle['seating_capacity']}"}), 400
     price = float(data.get('price_per_seat', 0))
     if price < 0:
         return jsonify({'error': 'Enter a valid fare per seat'}), 400
 
-    ride = Ride(
-        company_id=current_user.company_id,
-        driver_id=current_user._id,
-        vehicle_id=vehicle._id,
+    ride = new_ride(
+        company_id=current_user['company_id'],
+        driver_id=current_user['_id'],
+        vehicle_id=vehicle['_id'],
         start_location=data.get('start_location'),
         destination_location=data.get('destination_location'),
         departure_at=data.get('departure_at', ''),
@@ -72,9 +68,8 @@ def publish_ride(current_user):
         duration_min=data.get('duration_min'),
         status='active',
     )
-    db.session.add(ride)
-    db.session.commit()
-    return jsonify(ride.to_dict()), 201
+    db.rides.insert_one(ride)
+    return jsonify(serialize(ride)), 201
 
 
 @rides_bp.route('/search', methods=['POST'])
@@ -92,22 +87,22 @@ def search_rides(current_user):
     except Exception:
         weekday = ''
 
-    rides = Ride.query.filter(
-        Ride.company_id == current_user.company_id,
-        Ride.status == 'active',
-        Ride.driver_id != current_user._id,
-        Ride.seats_available >= seats,
-    ).all()
+    rides = db.rides.find({
+        'company_id': current_user['company_id'],
+        'status': 'active',
+        'driver_id': {'$ne': current_user['_id']},
+        'seats_available': {'$gte': seats},
+    })
 
     results = []
     for r in rides:
-        same_day = r.departure_at[:10] == date
-        recurring_match = weekday in (r.recurring_days or [])
+        same_day = (r.get('departure_at') or '')[:10] == date
+        recurring_match = weekday in (r.get('recurring_days') or [])
         if not (same_day or recurring_match):
             continue
-        if haversine_km(r.start_location, from_loc) > MAX_KM:
+        if haversine_km(r['start_location'], from_loc) > MAX_KM:
             continue
-        if haversine_km(r.destination_location, to_loc) > MAX_KM:
+        if haversine_km(r['destination_location'], to_loc) > MAX_KM:
             continue
         results.append(_enrich_ride(r))
 
@@ -122,10 +117,10 @@ def search_rides(current_user):
 @rides_bp.route('/<rid>', methods=['GET'])
 @require_auth
 def get_ride(current_user, rid):
-    ride = Ride.query.get(rid)
+    ride = db.rides.find_one({'_id': rid})
     if not ride:
         return jsonify({'error': 'Ride not found'}), 404
-    return jsonify(ride.to_dict())
+    return jsonify(serialize(ride))
 
 
 @rides_bp.route('', methods=['GET'])
@@ -134,19 +129,19 @@ def my_offered_rides(current_user):
     driver = request.args.get('driver')
     if not driver:
         return jsonify([])
-    rides = Ride.query.filter_by(driver_id=driver).order_by(Ride.created_at.desc()).all()
+    rides = db.rides.find({'driver_id': driver}).sort('created_at', DESCENDING)
     results = []
     for r in rides:
         rd = _enrich_ride(r)
-        bookings = Booking.query.filter(
-            Booking.ride_id == r._id,
-            Booking.status != 'cancelled'
-        ).all()
+        bookings = db.bookings.find({
+            'ride_id': r['_id'],
+            'status': {'$ne': 'cancelled'},
+        })
         rd['bookings'] = []
         for b in bookings:
-            bd = b.to_dict()
-            rider = User.query.get(b.rider_id)
-            bd['rider'] = rider.to_dict() if rider else None
+            bd = serialize(b)
+            rider = db.users.find_one({'_id': b['rider_id']})
+            bd['rider'] = serialize(rider)
             rd['bookings'].append(bd)
         results.append(rd)
     return jsonify(results)
@@ -185,12 +180,15 @@ def cancel_ride(current_user, rid):
 @rides_bp.route('/<rid>/route', methods=['PUT'])
 @require_auth
 def update_ride_route(current_user, rid):
-    ride = Ride.query.get(rid)
+    ride = db.rides.find_one({'_id': rid})
     if not ride:
         return jsonify({'error': 'Ride not found'}), 404
     data = request.get_json()
-    ride.route_coords = data.get('route_coords')
-    ride.distance_km = data.get('distance_km')
-    ride.duration_min = data.get('duration_min')
-    db.session.commit()
-    return jsonify(ride.to_dict())
+    updates = {
+        'route_coords': data.get('route_coords'),
+        'distance_km': data.get('distance_km'),
+        'duration_min': data.get('duration_min'),
+    }
+    db.rides.update_one({'_id': rid}, {'$set': updates})
+    ride.update(updates)
+    return jsonify(serialize(ride))

@@ -1,8 +1,8 @@
 # Data model
 
 The browser mock stores JSON arrays under the localStorage database key
-`carpool_db_v3`. The backend uses SQLAlchemy models with equivalent fields. IDs
-are UUID-like strings in the browser and database identifiers in the backend.
+`carpool_db_v3`. The backend stores equivalent documents in local MongoDB. IDs
+are UUID strings in both the browser and the backend database.
 
 ## Core records
 
