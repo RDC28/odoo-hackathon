@@ -15,7 +15,7 @@ export default function AdminVehicles() {
   useEffect(() => {
     load()
     api.adminListEmployees(companyId).then(all => {
-      const active = all.filter(u => u.platform_access === 'granted')
+      const active = all.filter(u => u.status === 'active')
       setEmployees(active)
       setF(prev => ({ ...prev, owner_id: prev.owner_id || (active[0] ? active[0]._id : '') }))
     })

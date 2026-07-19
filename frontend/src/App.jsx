@@ -15,6 +15,8 @@ import Payment from './pages/Payment'
 import RideHistory from './pages/RideHistory'
 import MyVehicle from './pages/MyVehicle'
 import Wallet from './pages/Wallet'
+import Transactions from './pages/Transactions'
+import DriverFeedback from './pages/DriverFeedback'
 import SavedPlaces from './pages/SavedPlaces'
 import Chat from './pages/Chat'
 import Settings from './pages/Settings'
@@ -59,6 +61,8 @@ export default function App() {
             <Route path="history" element={<RideHistory />} />
             <Route path="vehicles" element={<MyVehicle />} />
             <Route path="wallet" element={<Wallet />} />
+            <Route path="transactions" element={<Transactions />} />
+            <Route path="feedback" element={<DriverFeedback />} />
             <Route path="places" element={<SavedPlaces />} />
             <Route path="chat" element={<Chat />} />
             <Route path="settings" element={<Settings />} />

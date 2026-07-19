@@ -3,12 +3,9 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
 const DEMO_SHORTCUTS = [
-  { label: 'Odoo Admin', role: 'admin', email: 'admin@demo.com', password: 'demo123' },
-  { label: 'Odoo Driver', role: 'employee', email: 'raj@demo.com', password: 'demo123' },
-  { label: 'Odoo Rider', role: 'employee', email: 'priya@demo.com', password: 'demo123' },
-  { label: 'Acme Admin', role: 'admin', email: 'admin@acme01.com', password: 'demo123' },
-  { label: 'Acme Driver', role: 'employee', email: 'maya@acme01.com', password: 'demo123' },
-  { label: 'Acme Rider', role: 'employee', email: 'rohan@acme01.com', password: 'demo123' },
+  { label: 'Demo organisation admin', role: 'admin', email: 'admin@demo.com', password: 'demo123' },
+  { label: 'Demo driver · Raj Patel', role: 'employee', email: 'raj@demo.com', password: 'demo123' },
+  { label: 'Demo rider · Priya Nair', role: 'employee', email: 'priya@demo.com', password: 'demo123' },
   { label: 'Super Admin', role: 'superadmin', email: 'superadmin@platform.com', password: 'superadmin123' },
 ]
 

@@ -1,103 +1,60 @@
 # Architecture
 
-## Repo layout (proposed)
-
-```
-oodo-hackathon/
-├── apps/
-│   ├── mobile/          # React Native app (employee-facing, from wireframe screens)
-│   └── admin-web/        # React admin dashboard (Employees / Vehicles / Settings tabs)
-├── server/                # Flask API + Flask-SocketIO
-│   ├── app/
-│   │   ├── auth/
-│   │   ├── rides/
-│   │   ├── bookings/
-│   │   ├── payments/
-│   │   ├── wallet/
-│   │   ├── vehicles/
-│   │   ├── admin/
-│   │   ├── chat/          # global channel + DMs + ride chat
-│   │   └── tracking/       # live location / ETA
-│   └── requirements.txt
-└── docs/
-```
-
-## High-level diagram
+## Current prototype
 
 ```mermaid
 flowchart LR
-    subgraph Clients
-        MA[Mobile App - React Native<br/>Employees]
-        AW[Admin Web - React]
-    end
-
-    subgraph Server[Flask Backend]
-        REST[REST API]
-        WS[Flask-SocketIO<br/>chat + live tracking]
-    end
-
-    Mongo[(MongoDB)]
-    Redis[(Redis<br/>socket message queue + presence)]
-    OSM[OpenStreetMap tiles]
-    Nominatim[Nominatim - geocoding]
-    OSRM[OSRM - routing/ETA]
-    RZP[Razorpay Test Mode<br/>card/UPI sandbox]
-
-    MA -- HTTPS --> REST
-    MA <-- WSS --> WS
-    AW -- HTTPS --> REST
-
-    REST --> Mongo
-    WS --> Mongo
-    WS --> Redis
-
-    MA --> OSM
-    AW --> OSM
-    REST --> Nominatim
-    REST --> OSRM
-    REST --> RZP
-    MA --> RZP
+  Browser[React + Vite browser app] --> Mock[localStorage mock API]
+  Browser --> Maps[Leaflet + OSM tiles]
+  Browser --> Geo[Nominatim + OSRM]
+  Browser --> Razor[Flask payment endpoints]
+  Razor --> RZP[Razorpay Test Mode]
+  Backend[Flask + SQLAlchemy API] --> SQL[(SQLite/Postgres compatible DB)]
 ```
 
-## Why this stack
+The frontend is a single React application with route guards for employee,
+organization-admin, and platform-super-admin areas. `src/api/api.js` keeps the
+same async shape as the future HTTP API, while `src/api/db.js` persists demo
+records in browser localStorage. This makes the whole UI runnable without a
+database and keeps the eventual API swap mechanical.
 
-- **React / React Native** — one language across mobile and admin web, matches the
-  wireframe's screen-based navigation (bottom nav: Dashboard, My Trips, Ride History,
-  Vehicle, Settings).
-- **Flask** — small, unopinionated, fast to build a REST API against in a hackathon
-  timeframe; **Flask-SocketIO** adds WebSockets for chat and live trip tracking without
-  a second framework.
-- **MongoDB** — the domain is document-shaped (a ride embeds its own locations, a
-  message belongs to one conversation); avoids schema migrations while the wireframe
-  is still evolving.
-- **Razorpay Test Mode** — the problem statement mandates a payment sandbox; Razorpay's
-  test keys give a realistic card/UPI checkout with zero real-money risk. Wallet and
-  cash flows stay fully internal.
-- **Leaflet + OpenStreetMap** — free, no API key, sufficient for pickup/drop pins,
-  route preview polylines, and live-trip marker updates. Nominatim gives address ↔
-  lat/lng, OSRM gives route geometry + ETA (used by the "Coming in 5 Minutes" /
-  Track Ride screen).
-- **Redis** as the Socket.IO message queue — lets chat/tracking scale across more than
-  one Flask worker process without dropping events (skip this in a single-worker
-  hackathon deploy; add it when you actually run >1 worker).
+The exception is payments: Razorpay order creation and verification call Flask
+because the secret must never be exposed in the browser.
 
-## Auth & multi-tenancy
+## Backend production path
 
-Every user and every domain document (ride, vehicle, conversation, ...) carries a
-`company_id`. All queries are scoped by the authenticated user's `company_id` — this is
-what keeps one company's employees, rides, and chat from ever being visible to another
-company. Roles: `employee`, `admin` (per company). A user can simultaneously be a rider
-and a driver.
+The Flask backend contains the authoritative tenant, booking, report, and payment
+contracts. Every tenant-owned record carries `company_id`; every request derives
+the caller from authentication and scopes queries to that company. The backend
+booking route uses a conditional atomic seat decrement and creates the booking in
+the same transaction.
 
-## Deployment (hackathon-scale)
+For a production deployment, point the frontend API layer at Flask, use Postgres
+or the configured SQL database, add JWT/session rotation, and put the backend
+behind HTTPS. Use WebSockets/SSE only for ride-chat and availability/tracking
+events that need realtime delivery.
 
-```mermaid
-flowchart LR
-    Nginx --> AdminBuild[admin-web static build]
-    Nginx --> Flask[Flask + Flask-SocketIO<br/>gunicorn + eventlet]
-    Flask --> Mongo[(MongoDB container)]
-    Flask -.optional.-> Redis[(Redis container)]
+## Concurrency design
+
+The authoritative operation is:
+
+```sql
+UPDATE rides
+SET seats_available = seats_available - :requested
+WHERE id = :ride_id
+  AND status = 'active'
+  AND seats_available >= :requested;
 ```
 
-Single `docker-compose.yml` with `mongo`, `server`, and `admin-web` (nginx) services is
-enough to demo the whole platform; the mobile app runs via Expo against the same API.
+If the affected-row count is zero, return `409 Conflict`; otherwise insert the
+booking and commit the transaction. Add a unique idempotency key per rider/request
+to safely retry after network failure. For Razorpay flows, reserve seats with a
+short expiry or release them when payment is abandoned, then confirm the booking
+from the verified payment webhook.
+
+## Maps and simulation
+
+Leaflet renders the map and markers. Nominatim provides debounced address search
+and reverse geocoding; OSRM supplies route geometry, distance, and ETA. Track Ride
+uses that saved geometry for a visual marker playback. It intentionally does not
+read browser GPS or mutate trip state when playback reaches the end.

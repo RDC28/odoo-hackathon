@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import * as api from '../../api/api'
 import { useAuth } from '../../context/AuthContext'
+import { accountBadgeClass, statusLabel } from '../../utils'
 
 export default function AdminEmployees() {
   const { user } = useAuth()
@@ -90,7 +91,7 @@ export default function AdminEmployees() {
                 <td>{u.email}</td>
                 <td>{u.department || '—'}</td>
                 <td>{u.role}</td>
-                <td><span className={'badge ' + badgeClass(u.status)}>{u.status.replace('_', ' ')}</span></td>
+                <td><span className={'badge ' + accountBadgeClass(u.status)}>{statusLabel(u.status)}</span></td>
                 <td>
                   {u.role !== 'admin' && (
                     <div className="btn-row" style={{ gap: '0.5rem' }}>
@@ -122,15 +123,4 @@ export default function AdminEmployees() {
       </div>
     </div>
   )
-}
-
-function badgeClass(status) {
-  switch (status) {
-    case 'active': return 'badge-green'
-    case 'pending_approval': return 'badge-amber'
-    case 'suspended': return 'badge-red'
-    case 'rejected': return 'badge-red'
-    case 'deactivated': return 'badge-red'
-    default: return ''
-  }
 }

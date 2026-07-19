@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import * as api from '../api/api'
 import { useAuth } from '../context/AuthContext'
+import { formatDateTime } from '../utils'
 
 export default function Wallet() {
   const { user, refresh } = useAuth()
@@ -48,7 +49,7 @@ export default function Wallet() {
         <div key={t._id} className="card ride-card">
           <div>
             <strong>{t.type === 'credit' ? '↓ Credit' : '↑ Debit'}</strong>
-            <div className="muted">{t.reference} · {new Date(t.created_at).toLocaleString()}</div>
+            <div className="muted">{t.reference} · {formatDateTime(t.created_at)}</div>
           </div>
           <div className={'fare ' + (t.type === 'credit' ? 'green' : 'red')}>
             {t.type === 'credit' ? '+' : '−'} ₹ {t.amount}

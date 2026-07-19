@@ -11,6 +11,7 @@ class Vehicle(db.Model):
     registration_number = db.Column(db.String(20), nullable=False)
     seating_capacity = db.Column(db.Integer, nullable=False)
     mileage_kmpl = db.Column(db.Float, nullable=False, default=15.0)
+    photo = db.Column(db.Text, nullable=True)
     status = db.Column(db.String(20), default='active')  # active | inactive
     created_at = db.Column(db.DateTime, default=utcnow)
 
@@ -24,6 +25,7 @@ class Vehicle(db.Model):
             'registration_number': self.registration_number,
             'seating_capacity': self.seating_capacity,
             'mileage_kmpl': self.mileage_kmpl,
+            'photo': self.photo,
             'status': self.status,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }

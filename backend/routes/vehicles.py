@@ -37,10 +37,40 @@ def add_vehicle(current_user):
         registration_number=reg,
         seating_capacity=int(data.get('seating_capacity', 4)),
         mileage_kmpl=mileage,
+        photo=data.get('photo')
     )
     db.session.add(v)
     db.session.commit()
     return jsonify(v.to_dict()), 201
+
+
+@vehicles_bp.route('/<vid>', methods=['PUT'])
+@require_auth
+def update_vehicle(current_user, vid):
+    v = Vehicle.query.get(vid)
+    if not v:
+        return jsonify({'error': 'Vehicle not found'}), 404
+    data = request.get_json()
+    reg = (data.get('registration_number') or '').strip().upper()
+    existing = Vehicle.query.filter(
+        Vehicle.company_id == current_user.company_id,
+        Vehicle.registration_number == reg,
+        Vehicle._id != vid
+    ).first()
+    if existing:
+        return jsonify({'error': 'A vehicle with this registration number is already registered'}), 400
+    mileage = float(data.get('mileage_kmpl', 15))
+    if mileage <= 0:
+        return jsonify({'error': 'Mileage must be greater than 0'}), 400
+    v.type = data.get('type', 'car')
+    v.model = data.get('model', '')
+    v.registration_number = reg
+    v.seating_capacity = int(data.get('seating_capacity', 4))
+    v.mileage_kmpl = mileage
+    if 'photo' in data:
+        v.photo = data.get('photo')
+    db.session.commit()
+    return jsonify(v.to_dict())
 
 
 @vehicles_bp.route('/<vid>', methods=['DELETE'])

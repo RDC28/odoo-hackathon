@@ -1,5 +1,6 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import NotificationCenter from './NotificationCenter'
 
 const links = [
   { to: '/app', label: 'Dashboard', icon: 'home', end: true },
@@ -9,6 +10,8 @@ const links = [
   { to: '/app/history', label: 'Ride History', icon: 'schedule' },
   { to: '/app/vehicles', label: 'My Vehicle', icon: 'commute' },
   { to: '/app/wallet', label: 'Wallet', icon: 'account_balance_wallet' },
+  { to: '/app/transactions', label: 'Transactions', icon: 'receipt_long' },
+  { to: '/app/feedback', label: 'Driver Feedback', icon: 'rate_review' },
   { to: '/app/chat', label: 'Chat', icon: 'chat_bubble' },
   { to: '/app/places', label: 'Saved Places', icon: 'location_on' },
   { to: '/app/settings', label: 'Settings', icon: 'settings' },
@@ -44,6 +47,7 @@ export default function Layout() {
         </div>
       </aside>
       <main className="main">
+        <div className="app-toolbar"><NotificationCenter userId={user._id} /></div>
         <Outlet />
       </main>
     </div>

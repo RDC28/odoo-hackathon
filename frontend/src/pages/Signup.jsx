@@ -1,11 +1,9 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import * as api from '../api/api'
-import { useAuth } from '../context/AuthContext'
 
 export default function Signup() {
   const navigate = useNavigate()
-  const { refresh } = useAuth()
   const [f, setF] = useState({ joinCode: '', name: '', email: '', phone: '', password: '', confirm: '', department: '' })
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
@@ -37,6 +35,16 @@ export default function Signup() {
   return (
     <div className="auth-page">
       <form className="auth-card" onSubmit={submit}>
+        <div className="auth-path-switch" aria-label="Choose account type">
+          <div className="auth-path-option active">
+            <span className="material-symbols-rounded">person_add</span>
+            <div><strong>Employee sign up</strong><small>Join an existing workspace</small></div>
+          </div>
+          <Link className="auth-path-option" to="/register-org">
+            <span className="material-symbols-rounded">business</span>
+            <div><strong>Register organization</strong><small>Create a new workspace</small></div>
+          </Link>
+        </div>
         <h2>Create Account</h2>
         <p className="muted">Join your company's Ascend workspace.</p>
         <div className="field"><label>Organization join code</label><input required value={f.joinCode} onChange={set('joinCode')} placeholder="e.g. DEMO01" style={{ textTransform: 'uppercase' }} /></div>

@@ -1,5 +1,6 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
+import NotificationCenter from '../../components/NotificationCenter'
 
 export default function SuperAdminLayout() {
   const { user, logout } = useAuth()
@@ -35,6 +36,7 @@ export default function SuperAdminLayout() {
         </div>
       </nav>
       <main className="superadmin-main">
+        <div className="superadmin-main-toolbar"><NotificationCenter userId={user._id} /></div>
         <Outlet />
       </main>
     </div>

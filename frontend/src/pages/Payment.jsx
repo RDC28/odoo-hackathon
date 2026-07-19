@@ -2,6 +2,7 @@
 import { useNavigate, useParams } from 'react-router-dom'
 import * as api from '../api/api'
 import { useAuth } from '../context/AuthContext'
+import { shortAddress } from '../utils'
 
 const METHODS = [
   { id: 'razorpay', icon: 'payments', label: 'Razorpay', note: 'Test mode · Card, UPI, and more' },
@@ -33,6 +34,8 @@ export default function Payment() {
   const [paid, setPaid] = useState(false)
   const [paying, setPaying] = useState(false)
   const [stars, setStars] = useState(0)
+  const [feedback, setFeedback] = useState('')
+  const [reviewing, setReviewing] = useState(false)
 
   useEffect(() => {
     api.getBooking(id).then(booking => {
@@ -89,10 +92,16 @@ export default function Payment() {
     setPaying(false)
   }
 
-  async function rateAndFinish(s) {
-    setStars(s)
-    await api.rateBooking(b._id, s)
-    setTimeout(() => navigate('/app/history'), 600)
+  async function submitReview() {
+    if (!stars || reviewing) return
+    setReviewing(true)
+    try {
+      await api.rateBooking(b._id, stars, feedback)
+      navigate('/app/history')
+    } catch (err) {
+      setError(err.message)
+      setReviewing(false)
+    }
   }
 
   if (paid) {
@@ -103,12 +112,15 @@ export default function Payment() {
           <h2> Payment successful</h2>
           <p>₹ {b.fare} paid via {method}. The trip has been added to your Ride History.</p>
           <h3>Rate your driver {b.driver ? b.driver.name : ''}</h3>
+          <p className="muted">Choose a rating from 1 to 5 stars.</p>
           <div className="stars-row">
             {[1, 2, 3, 4, 5].map(s => (
-              <button key={s} className={'star-btn' + (s <= stars ? ' on' : '')} onClick={() => rateAndFinish(s)}></button>
+              <button type="button" key={s} className={'star-btn' + (s <= stars ? ' on' : '')} aria-label={`${s} star${s === 1 ? '' : 's'}`} onClick={() => setStars(s)}><span className="material-symbols-rounded">{s <= stars ? 'star' : 'star_outline'}</span></button>
             ))}
           </div>
-          <button className="btn btn-outline" onClick={() => navigate('/app/history')}>Skip</button>
+          <div className="field review-feedback-field"><label>Optional feedback</label><textarea value={feedback} onChange={e => setFeedback(e.target.value)} maxLength={500} placeholder="What went well?" /></div>
+          {error && <div className="error review-error">{error}</div>}
+          <div className="review-actions"><button className="btn btn-primary" disabled={!stars || reviewing} onClick={submitReview}>{reviewing ? 'Submitting…' : 'Submit feedback'}</button><button className="btn btn-outline" onClick={() => navigate('/app/history')}>Skip</button></div>
         </div>
       </div>
     )
@@ -120,7 +132,7 @@ export default function Payment() {
       <h1>Payment</h1>
       <div className="card">
         <div className="fare-banner">
-          <span>{b.pickup_point.address.split(',')[0]} → {b.drop_point.address.split(',')[0]}</span>
+          <span>{shortAddress(b.pickup_point.address)} → {shortAddress(b.drop_point.address)}</span>
           <strong>₹ {b.fare}</strong>
         </div>
         <h3>Choose payment method</h3>

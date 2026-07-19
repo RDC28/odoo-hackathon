@@ -20,10 +20,12 @@ export default function LocationInput({ label, value, onChange, placeholder, sav
     if (t.trim().length < 3) { setSugs([]); setOpen(false); setLoading(false); return }
     setLoading(true)
     const myReq = ++reqId.current
+    // Debounce geocoding so Nominatim is not called for every keystroke.
     timer.current = setTimeout(async () => {
       try {
         const results = await geocode(t)
-        if (myReq !== reqId.current) return // a newer keystroke already superseded this request
+        // Ignore a slow older response so it cannot overwrite newer suggestions.
+        if (myReq !== reqId.current) return
         setSugs(results)
         setOpen(true)
       } catch {
@@ -48,6 +50,7 @@ export default function LocationInput({ label, value, onChange, placeholder, sav
         value={text}
         placeholder={placeholder || 'Search a location…'}
         onChange={e => handleText(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Escape') setOpen(false) }}
         onFocus={() => sugs.length && setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 200)}
       />

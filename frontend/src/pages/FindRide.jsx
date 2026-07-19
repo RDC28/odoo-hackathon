@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import * as api from '../api/api'
 import { fetchRoute } from '../api/geo'
@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext'
 import LocationInput from '../components/LocationInput'
 import MapView from '../components/MapView'
 import RoutePicker from '../components/RoutePicker'
+import { formatDateTime, shortAddress } from '../utils'
 
 function Stars({ avg, count }) {
   if (!count) return <span className="muted">no ratings yet</span>
@@ -126,14 +127,21 @@ export default function FindRide() {
             <div className="card"><p className="muted">No matching rides from your colleagues yet. Try another date, or ask in the company chat!</p></div>
           )}
           {results && results.map(r => (
-            <div key={r._id} className="card ride-card">
-              <div>
+            <div key={r._id} className="card ride-card" style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+              {r.vehicle?.photo ? (
+                <img src={r.vehicle.photo} alt={r.vehicle.model} style={{ width: '64px', height: '64px', objectFit: 'cover', borderRadius: '8px' }} />
+              ) : (
+                <div style={{ width: '64px', height: '64px', backgroundColor: 'var(--border-color)', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <span className="material-symbols-rounded" style={{ fontSize: '2rem', color: 'var(--muted-color)' }}>directions_car</span>
+                </div>
+              )}
+              <div style={{ flex: 1 }}>
                 <strong>{r.driver.name}</strong> <Stars avg={r.driver.rating_avg} count={r.driver.rating_count} />
                 <div className="muted">
-                  {r.start_location.address.split(',')[0]} → {r.destination_location.address.split(',')[0]}
+                  {shortAddress(r.start_location.address)} → {shortAddress(r.destination_location.address)}
                 </div>
                 <div className="muted">
-                   {new Date(r.departure_at).toLocaleString()} · {r.vehicle ? `${r.vehicle.model} · ${r.vehicle.registration_number}` : ''}
+                   {formatDateTime(r.departure_at)} · {r.vehicle ? `${r.vehicle.model} · ${r.vehicle.registration_number}` : ''}
                   {r.recurring_days && r.recurring_days.length > 0 && ` ·  ${r.recurring_days.join(', ')}`}
                 </div>
               </div>

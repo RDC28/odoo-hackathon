@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import * as api from '../api/api'
 import { useAuth } from '../context/AuthContext'
 import Welcome from './Welcome'
+import { formatDateTime, statusLabel, tripBadgeClass } from '../utils'
 
 export default function Dashboard() {
   const { user } = useAuth()
@@ -74,10 +75,10 @@ export default function Dashboard() {
             <div>
               <strong>{trips[0].pickup_point.address.split(',')[0]} → {trips[0].drop_point.address.split(',')[0]}</strong>
               <div className="muted">
-                {new Date(trips[0].ride.departure_at).toLocaleString()} · driver {trips[0].driver && trips[0].driver.name}
+                {formatDateTime(trips[0].ride.departure_at)} · driver {trips[0].driver && trips[0].driver.name}
               </div>
             </div>
-            <span className={'badge ' + badgeClass(trips[0].status)}>{trips[0].status.replace(/_/g, ' ')}</span>
+          <span className={'badge ' + tripBadgeClass(trips[0].status)}>{statusLabel(trips[0].status)}</span>
           </Link>
         </>
       )}
@@ -85,11 +86,4 @@ export default function Dashboard() {
   )
 }
 
-export function badgeClass(status) {
-  if (['booked', 'active'].includes(status)) return 'badge-blue'
-  if (['started', 'in_progress'].includes(status)) return 'badge-amber'
-  if (['completed', 'payment_completed'].includes(status)) return 'badge-green'
-  if (status === 'payment_pending') return 'badge-amber'
-  return 'badge-red'
-}
 

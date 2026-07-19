@@ -7,7 +7,7 @@ from models.ride import Ride
 from models.vehicle import Vehicle
 from models.booking import Booking
 
-superadmin_bp = Blueprint('superadmin', __name__)
+superadmin_bp = Blueprint('superadmin', __name__, url_prefix='/api/superadmin')
 
 @superadmin_bp.route('/stats', methods=['GET'])
 @require_superadmin

@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from flask import Blueprint, request, jsonify
 from models import db
 from models.booking import Booking
@@ -51,7 +52,6 @@ def book_ride(current_user):
         ride_id=ride._id,
     )
     conv.participant_ids = [current_user._id, ride.driver_id]
-    from datetime import datetime, timezone
     conv.last_message_at = datetime.now(timezone.utc).isoformat()
     db.session.add(conv)
     db.session.flush()

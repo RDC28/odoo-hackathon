@@ -4,13 +4,17 @@ from flask_jwt_extended import get_jwt_identity, verify_jwt_in_request
 from models.user import User
 
 
+def _current_user():
+    """Read the JWT from the request and load that user from the database."""
+    verify_jwt_in_request()
+    return User.query.get(get_jwt_identity())
+
+
 def require_auth(f):
-    """Decorator that validates JWT and checks user still has platform access."""
+    """Any logged-in user whose account is active."""
     @wraps(f)
     def wrapper(*args, **kwargs):
-        verify_jwt_in_request()
-        uid = get_jwt_identity()
-        user = User.query.get(uid)
+        user = _current_user()
         if not user:
             return jsonify({'error': 'User not found'}), 401
         if user.status != 'active':
@@ -20,12 +24,10 @@ def require_auth(f):
 
 
 def require_admin(f):
-    """Decorator that validates JWT and checks user is an admin."""
+    """Only organization admins."""
     @wraps(f)
     def wrapper(*args, **kwargs):
-        verify_jwt_in_request()
-        uid = get_jwt_identity()
-        user = User.query.get(uid)
+        user = _current_user()
         if not user:
             return jsonify({'error': 'User not found'}), 401
         if user.role != 'admin':
@@ -33,12 +35,12 @@ def require_admin(f):
         return f(user, *args, **kwargs)
     return wrapper
 
+
 def require_superadmin(f):
+    """Only the platform superadmin."""
     @wraps(f)
     def wrapper(*args, **kwargs):
-        verify_jwt_in_request()
-        uid = get_jwt_identity()
-        user = User.query.get(uid)
+        user = _current_user()
         if not user or user.role != 'superadmin':
             return jsonify({'error': 'Superadmin access required'}), 403
         return f(user, *args, **kwargs)

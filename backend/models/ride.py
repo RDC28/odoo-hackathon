@@ -1,4 +1,3 @@
-import json
 from models import db, gen_id, utcnow
 
 
@@ -8,51 +7,18 @@ class Ride(db.Model):
     company_id = db.Column(db.String(36), db.ForeignKey('companies._id'), nullable=False)
     driver_id = db.Column(db.String(36), db.ForeignKey('users._id'), nullable=False)
     vehicle_id = db.Column(db.String(36), db.ForeignKey('vehicles._id'), nullable=False)
-    # Locations stored as JSON strings
-    start_location_json = db.Column(db.Text, nullable=False)
-    destination_location_json = db.Column(db.Text, nullable=False)
+    start_location = db.Column(db.JSON, nullable=False)        # { address, lat, lng }
+    destination_location = db.Column(db.JSON, nullable=False)  # { address, lat, lng }
     departure_at = db.Column(db.String(30), nullable=False)
-    recurring_days_json = db.Column(db.Text, default='[]')
+    recurring_days = db.Column(db.JSON, default=list)          # e.g. ["Mo", "Tu"]
     seats_total = db.Column(db.Integer, nullable=False)
     seats_available = db.Column(db.Integer, nullable=False)
     price_per_seat = db.Column(db.Float, default=0.0)
-    route_coords_json = db.Column(db.Text, nullable=True)
+    route_coords = db.Column(db.JSON, nullable=True)           # [[lat, lng], ...]
     distance_km = db.Column(db.Float, nullable=True)
     duration_min = db.Column(db.Float, nullable=True)
-    status = db.Column(db.String(20), default='active')
+    status = db.Column(db.String(20), default='active')  # active | started | in_progress | completed | cancelled
     created_at = db.Column(db.DateTime, default=utcnow)
-
-    @property
-    def start_location(self):
-        return json.loads(self.start_location_json) if self.start_location_json else None
-
-    @start_location.setter
-    def start_location(self, val):
-        self.start_location_json = json.dumps(val) if val else None
-
-    @property
-    def destination_location(self):
-        return json.loads(self.destination_location_json) if self.destination_location_json else None
-
-    @destination_location.setter
-    def destination_location(self, val):
-        self.destination_location_json = json.dumps(val) if val else None
-
-    @property
-    def recurring_days(self):
-        return json.loads(self.recurring_days_json) if self.recurring_days_json else []
-
-    @recurring_days.setter
-    def recurring_days(self, val):
-        self.recurring_days_json = json.dumps(val) if val else '[]'
-
-    @property
-    def route_coords(self):
-        return json.loads(self.route_coords_json) if self.route_coords_json else None
-
-    @route_coords.setter
-    def route_coords(self, val):
-        self.route_coords_json = json.dumps(val) if val else None
 
     def to_dict(self):
         return {
@@ -63,7 +29,7 @@ class Ride(db.Model):
             'start_location': self.start_location,
             'destination_location': self.destination_location,
             'departure_at': self.departure_at,
-            'recurring_days': self.recurring_days,
+            'recurring_days': self.recurring_days or [],
             'seats_total': self.seats_total,
             'seats_available': self.seats_available,
             'price_per_seat': self.price_per_seat,

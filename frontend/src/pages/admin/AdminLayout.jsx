@@ -2,6 +2,7 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import * as api from '../../api/api'
 import { useAuth } from '../../context/AuthContext'
+import NotificationCenter from '../../components/NotificationCenter'
 
 const tabClass = ({ isActive }) => 'admin-tab' + (isActive ? ' active' : '')
 
@@ -22,7 +23,8 @@ export default function AdminLayout() {
             <strong>{company.name}</strong>
             <span className="join-chip">Join code: {company.join_code}</span>
           </div>
-          <div className="btn-row">
+          <div className="admin-header-actions">
+            <NotificationCenter userId={user._id} />
             <button className="btn btn-outline btn-sm" onClick={() => { logout(); navigate('/') }}>Logout</button>
           </div>
         </div>

@@ -1,65 +1,42 @@
-﻿import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { seedDemo } from '../api/seed'
 
 export default function Landing() {
-  const [demo, setDemo] = useState(null)
-
   return (
     <div className="auth-page landing-page">
-      <div className="landing">
-        <div className="landing-hero">
-          <div className="landing-mark"><span className="material-symbols-rounded">directions_car</span></div>
-          <p className="eyebrow">Enterprise mobility workspace</p>
-          <h1>Ascend</h1>
-          <p className="tagline">Enterprise Ride Sharing Platform</p>
-          <p className="muted">
-            Employees of a registered organization share rides with each other — find a ride,
-            offer your own vehicle, track trips live, pay in-app, and chat with colleagues.
-            Fully internal to your company.
-          </p>
-        </div>
-        <div className="landing-actions">
-          <Link className="action-card" to="/login">
-            <span className="landing-card-icon material-symbols-rounded">login</span>
-            <h3>Login</h3>
-            <p>Employee or admin of a registered organization</p>
-          </Link>
-          <Link className="action-card" to="/signup">
-            <span className="landing-card-icon material-symbols-rounded">person_add</span>
-            <h3>Employee Sign Up</h3>
-            <p>Join your company with its join code</p>
-          </Link>
-          <Link className="action-card" to="/register-org">
-            <span className="landing-card-icon material-symbols-rounded">business</span>
-            <h3>Register Organization</h3>
-            <p>Set up your company and its admin account</p>
-          </Link>
-        </div>
-        <div className="demo-box">
-          <button className="btn btn-outline" onClick={() => setDemo(seedDemo())}>
-            Load demo data
-          </button>
-          {demo && (
-            <div className="card demo-creds">
-              <p><strong>Demo loaded.</strong> Organization join codes: {demo.joinCodes.map(code => <code key={code} style={{ marginLeft: 6 }}>{code}</code>)}</p>
-              <table className="table">
-                <tbody>
-                  {demo.accounts.map(a => (
-                    <tr key={a.email}>
-                      <td>{a.label}</td>
-                      <td><code>{a.email}</code></td>
-                      <td><code>{a.password}</code></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <p className="muted">Tip: open two browser tabs and log in as two different users to try chat and booking flows against each other.</p>
-            </div>
-          )}
-        </div>
-      </div>
+      <main className="landing landing-simple">
+        <header className="landing-topbar">
+          <div className="landing-wordmark"><span className="material-symbols-rounded">directions_car</span> Ascend</div>
+        </header>
+
+        <section className="landing-entry">
+          <div className="landing-entry-copy">
+            <p className="eyebrow">Private mobility for your organization</p>
+            <h1>Share the ride.<br /><span>Move together.</span></h1>
+            <p className="landing-lede">Find and offer everyday rides with people in your trusted company network.</p>
+          </div>
+
+          <div className="landing-entry-actions">
+            <Link className="landing-entry-card landing-entry-card-primary" to="/login">
+              <span className="landing-entry-icon material-symbols-rounded">login</span>
+              <span className="landing-entry-card-content"><strong>Log in</strong><small>Access your Ascend workspace</small></span>
+              <span className="material-symbols-rounded landing-entry-arrow">arrow_forward</span>
+            </Link>
+            <Link className="landing-entry-card" to="/signup">
+              <span className="landing-entry-icon material-symbols-rounded">person_add</span>
+              <span className="landing-entry-card-content"><strong>Sign up</strong><small>Join your organization or create one</small></span>
+              <span className="material-symbols-rounded landing-entry-arrow">arrow_forward</span>
+            </Link>
+          </div>
+
+          <div className="landing-entry-note"><span className="material-symbols-rounded">lock</span> Internal to your organization</div>
+        </section>
+
+        <footer className="landing-simple-footer">
+          <span><span className="material-symbols-rounded">route</span> Plan your commute</span>
+          <span><span className="material-symbols-rounded">payments</span> Transparent fares</span>
+          <span><span className="material-symbols-rounded">verified_user</span> Trusted company network</span>
+        </footer>
+      </main>
     </div>
   )
 }
-

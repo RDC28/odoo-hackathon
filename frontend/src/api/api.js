@@ -11,12 +11,40 @@ const SESSION_KEY = 'carpool_session'
 const WEEKDAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
 const BACKEND_API = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 
+// ---------- notifications ----------
+
+export function createNotification(userId, { type, title, body, link = '', icon = 'notifications' }) {
+  return col('notifications').insert({ user_id: userId, type, title, body, link, icon, read: false })
+}
+
+export async function myNotifications(uid) {
+  return col('notifications').find(n => n.user_id === uid).sort((a, b) => b.created_at.localeCompare(a.created_at))
+}
+
+export async function markNotificationRead(id) {
+  return col('notifications').update(id, { read: true })
+}
+
+export async function markAllNotificationsRead(uid) {
+  col('notifications').find(n => n.user_id === uid && !n.read).forEach(n => col('notifications').update(n._id, { read: true }))
+}
+
+function notifyUser(userId, notification) {
+  if (userId) createNotification(userId, notification)
+}
+
+function notifyCompany(companyId, notification, exclude = []) {
+  col('users').find(user => user.company_id === companyId && !exclude.includes(user._id)).forEach(user => notifyUser(user._id, notification))
+}
+
 // Re-validates against the DB record (not a caller-supplied object) so a
 // revoked employee's already-open session can't keep booking/publishing/chatting —
 // mirrors a real backend re-checking auth on every request.
 function requireActive(uid) {
   const u = col('users').get(uid)
   if (!u || u.status !== 'active') throw new Error('Your account is not active. Please contact your administrator.')
+  const company = u.company_id ? col('companies').get(u.company_id) : null
+  if (company?.platform_status === 'suspended') throw new Error('Your organization is currently suspended. Please contact your administrator.')
   return u
 }
 
@@ -38,6 +66,8 @@ export async function login(email, password) {
   if (!u) throw new Error('Invalid email or password')
   if (u.status === 'pending_approval') throw new Error('Your registration is pending admin approval.')
   if (u.status !== 'active') throw new Error('Your account is ' + u.status + '. Please contact your administrator.')
+  const company = u.company_id ? col('companies').get(u.company_id) : null
+  if (company?.platform_status === 'suspended') throw new Error('Your organization is currently suspended. Please contact your administrator.')
   localStorage.setItem(SESSION_KEY, u._id)
   return u
 }
@@ -97,7 +127,7 @@ export async function myVehicles(uid) {
   return col('vehicles').find(v => v.owner_id === uid)
 }
 
-export async function addVehicle(uid, companyId, { type, model, registration_number, seating_capacity, mileage_kmpl }) {
+export async function addVehicle(uid, companyId, { type, model, registration_number, seating_capacity, mileage_kmpl, photo }) {
   const reg = registration_number.trim().toUpperCase()
   if (col('vehicles').findOne(v => v.company_id === companyId && v.registration_number === reg))
     throw new Error('A vehicle with this registration number is already registered')
@@ -105,7 +135,19 @@ export async function addVehicle(uid, companyId, { type, model, registration_num
     company_id: companyId, owner_id: uid,
     type, model, registration_number: reg, seating_capacity: +seating_capacity,
     mileage_kmpl: +(mileage_kmpl || 15),
+    photo: photo || null,
     status: 'active',
+  })
+}
+
+export async function updateVehicle(id, companyId, { type, model, registration_number, seating_capacity, mileage_kmpl, photo }) {
+  const reg = registration_number.trim().toUpperCase()
+  const existing = col('vehicles').findOne(v => v.company_id === companyId && v.registration_number === reg && v._id !== id)
+  if (existing) throw new Error('A vehicle with this registration number is already registered')
+  col('vehicles').update(id, {
+    type, model, registration_number: reg, seating_capacity: +seating_capacity,
+    mileage_kmpl: +(mileage_kmpl || 15),
+    photo: photo || null,
   })
 }
 
@@ -123,6 +165,10 @@ export async function myPlaces(uid) {
 
 export async function addPlace(uid, { label, address, lat, lng }) {
   return col('saved_places').insert({ user_id: uid, label, address, lat, lng })
+}
+
+export async function updatePlace(id, { label, address, lat, lng }) {
+  return col('saved_places').update(id, { label, address, lat, lng })
 }
 
 export async function removePlace(id) {
@@ -168,12 +214,22 @@ function sameDay(iso, dateStr) {
   return iso.slice(0, 10) === dateStr
 }
 
+function rankRidesByDriverRating(rides) {
+  return rides.sort((a, b) => {
+    const avgDifference = (b.driver?.rating_avg || 0) - (a.driver?.rating_avg || 0)
+    if (avgDifference) return avgDifference
+    const countDifference = (b.driver?.rating_count || 0) - (a.driver?.rating_count || 0)
+    if (countDifference) return countDifference
+    return a.departure_at.localeCompare(b.departure_at)
+  })
+}
+
 // Company-scoped ride search: same org only (company A never sees company B),
 // matched by pickup/destination proximity (haversine) + date or recurring weekday.
 export async function searchRides(user, { from, to, date, seats }) {
   const weekday = WEEKDAYS[new Date(date + 'T00:00').getDay()]
   const MAX_KM = 8
-  return col('rides')
+  return rankRidesByDriverRating(col('rides')
     .find(r =>
       r.company_id === user.company_id &&
       r.status === 'active' &&
@@ -188,25 +244,21 @@ export async function searchRides(user, { from, to, date, seats }) {
       const vehicle = col('vehicles').get(r.vehicle_id)
       return { ...r, driver, vehicle }
     })
-    .sort((a, b) => a.departure_at.localeCompare(b.departure_at))
+    )
 }
 
 // Planned ride origins near the requested pickup. These are not live GPS
 // positions; live tracking remains available only after booking a ride.
 export async function nearbyRides(user, { from, date, seats = 1 }) {
   const weekday = WEEKDAYS[new Date(date + 'T00:00').getDay()]
-  return col('rides').find(r =>
+  return rankRidesByDriverRating(col('rides').find(r =>
     r.company_id === user.company_id &&
     r.status === 'active' &&
     r.driver_id !== user._id &&
     r.seats_available >= +seats &&
     (sameDay(r.departure_at, date) || (r.recurring_days || []).includes(weekday)) &&
     haversineKm(r.start_location, from) <= 8
-  ).map(r => ({ ...r, driver: col('users').get(r.driver_id), vehicle: col('vehicles').get(r.vehicle_id) }))
-}
-
-export async function getRide(id) {
-  return col('rides').get(id)
+  ).map(r => ({ ...r, driver: col('users').get(r.driver_id), vehicle: col('vehicles').get(r.vehicle_id) })))
 }
 
 export async function myOfferedRides(uid) {
@@ -217,7 +269,12 @@ export async function myOfferedRides(uid) {
       vehicle: col('vehicles').get(r.vehicle_id),
       bookings: col('bookings')
         .find(b => b.ride_id === r._id && b.status !== 'cancelled')
-        .map(b => ({ ...b, rider: col('users').get(b.rider_id) })),
+        .map(b => ({
+          ...b,
+          driver_approval: b.driver_approval || 'approved',
+          rider_approval: b.rider_approval || 'approved',
+          rider: col('users').get(b.rider_id),
+        })),
     }))
     .sort((a, b) => b.created_at.localeCompare(a.created_at))
 }
@@ -230,6 +287,8 @@ function setRideAndBookings(rideId, rideStatus, bookingStatus) {
 }
 
 export async function startRide(rideId) {
+  const pending = col('bookings').find(b => b.ride_id === rideId && b.status !== 'cancelled' && (b.driver_approval || 'approved') !== 'approved')
+  if (pending.length) throw new Error('Approve or reject every passenger before starting the ride.')
   setRideAndBookings(rideId, 'started', 'started')
 }
 
@@ -243,7 +302,10 @@ export async function completeRide(rideId) {
   // already been paid, so re-entering Track Ride after payment can't undo it.
   col('bookings')
     .find(b => b.ride_id === rideId && !['cancelled', 'payment_completed'].includes(b.status))
-    .forEach(b => col('bookings').update(b._id, { status: 'payment_pending' }))
+    .forEach(b => {
+      col('bookings').update(b._id, { status: 'payment_pending' })
+      notifyUser(b.rider_id, { type: 'payment', title: 'Payment available', body: 'Your completed ride is ready for payment.', link: `/app/trips/${b._id}/pay`, icon: 'payments' })
+    })
 }
 
 export async function cancelRide(rideId) {
@@ -276,7 +338,7 @@ export async function bookRide(user, ride, seats) {
     ride_id: current._id,
     last_message_at: new Date().toISOString(),
   })
-  return col('bookings').insert({
+  const booking = col('bookings').insert({
     ride_id: current._id,
     rider_id: freshUser._id,
     seats_booked: seats,
@@ -284,8 +346,14 @@ export async function bookRide(user, ride, seats) {
     drop_point: current.destination_location,
     fare: current.price_per_seat * seats,
     status: 'booked',
+    driver_approval: 'pending',
+    rider_approval: 'approved',
     conversation_id: conv._id,
   })
+  const vehicle = col('vehicles').get(current.vehicle_id)
+  notifyUser(current.driver_id, { type: 'booking', title: 'New booking request', body: `${freshUser.name} requested ${seats} seat${seats === 1 ? '' : 's'} on your ${vehicle?.model || 'ride'}.`, link: '/app/trips', icon: 'person_add' })
+  notifyUser(freshUser._id, { type: 'booking', title: 'Booking request sent', body: `Your request for ${vehicle?.model || 'the ride'} is waiting for driver approval.`, link: '/app/trips', icon: 'event_seat' })
+  return booking
 }
 
 function enrichBooking(b) {
@@ -298,13 +366,32 @@ function enrichBooking(b) {
 export async function myBookings(uid) {
   return col('bookings')
     .find(b => b.rider_id === uid && !['payment_completed', 'cancelled'].includes(b.status))
-    .map(enrichBooking)
+    .map(b => ({ ...enrichBooking(b), driver_approval: b.driver_approval || 'approved', rider_approval: b.rider_approval || 'approved' }))
     .sort((a, b) => b.created_at.localeCompare(a.created_at))
 }
 
 export async function getBooking(id) {
   const b = col('bookings').get(id)
-  return b ? enrichBooking(b) : null
+  return b ? { ...enrichBooking(b), driver_approval: b.driver_approval || 'approved', rider_approval: b.rider_approval || 'approved' } : null
+}
+
+export async function approveBooking(bookingId) {
+  const booking = col('bookings').get(bookingId)
+  if (!booking || booking.status === 'cancelled') throw new Error('This booking is no longer active.')
+  if (col('rides').get(booking.ride_id)?.status !== 'active') throw new Error('Passengers can only be approved before the ride starts.')
+  const updated = col('bookings').update(bookingId, { driver_approval: 'approved' })
+  notifyUser(booking.rider_id, { type: 'approval', title: 'Ride request approved', body: 'The driver approved your seat. Your trip is ready when the ride starts.', link: `/app/trips/${bookingId}`, icon: 'check_circle' })
+  return updated
+}
+
+export async function rejectBooking(bookingId) {
+  const booking = col('bookings').get(bookingId)
+  if (!booking || booking.status === 'cancelled') return
+  const ride = col('rides').get(booking.ride_id)
+  if (ride && ride.status === 'active') col('rides').update(ride._id, { seats_available: ride.seats_available + booking.seats_booked })
+  col('bookings').update(bookingId, { status: 'cancelled', rider_approval: 'rejected', driver_approval: 'rejected' })
+  notifyUser(booking.rider_id, { type: 'booking', title: 'Ride request cancelled', body: 'This booking request was cancelled and the seat was released.', link: '/app/trips', icon: 'cancel' })
+  if (ride) notifyUser(ride.driver_id, { type: 'booking', title: 'Booking cancelled', body: 'A passenger booking was cancelled and the seat is available again.', link: '/app/trips', icon: 'event_seat' })
 }
 
 export async function cancelBooking(id) {
@@ -413,16 +500,25 @@ export async function rechargeWallet(uid, amount, method) {
 
 // ---------- ratings ----------
 
-export async function rateBooking(bookingId, stars) {
+export async function rateBooking(bookingId, stars, comment = '') {
   const b = col('bookings').get(bookingId)
   if (!b) return
   const ride = col('rides').get(b.ride_id)
   if (!ride) return
-  col('ratings').insert({ booking_id: bookingId, rater_id: b.rider_id, ratee_id: ride.driver_id, stars })
+  if (col('ratings').findOne(rating => rating.booking_id === bookingId)) return
+  col('ratings').insert({ booking_id: bookingId, rater_id: b.rider_id, ratee_id: ride.driver_id, stars, comment: comment.trim() })
   const d = col('users').get(ride.driver_id)
   const count = d.rating_count + 1
   const avg = +(((d.rating_avg * d.rating_count) + stars) / count).toFixed(1)
   col('users').update(d._id, { rating_avg: avg, rating_count: count })
+}
+
+export async function driverFeedback(uid) {
+  const driver = col('users').get(uid)
+  const reviews = col('ratings').find(review => review.ratee_id === uid).map(review => ({
+    ...review, rater: col('users').get(review.rater_id),
+  })).sort((a, b) => b.created_at.localeCompare(a.created_at))
+  return { average: driver?.rating_avg || 0, count: driver?.rating_count || 0, reviews }
 }
 
 // ---------- chat ----------
@@ -503,7 +599,10 @@ export async function adminAddEmployee(companyId, { name, email, phone, departme
 }
 
 export async function adminSetStatus(uid, status) {
-  return col('users').update(uid, { status })
+  const updated = col('users').update(uid, { status })
+  const labels = { active: 'Your employee access is active.', suspended: 'Your employee access has been suspended.', rejected: 'Your employee request was rejected.', deactivated: 'Your employee access has been deactivated.' }
+  notifyUser(uid, { type: 'admin', title: 'Account access updated', body: labels[status] || 'Your account status was updated by an administrator.', link: '/app/settings', icon: status === 'active' ? 'check_circle' : 'manage_accounts' })
+  return updated
 }
 
 export async function adminListVehicles(companyId) {
@@ -542,7 +641,7 @@ export async function adminReports(companyId) {
     return ride && ride.company_id === companyId
   })
   const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0)
-  const ridesThisMonth = rides.filter(r => new Date(r.created_at) >= monthStart).length
+  const ridesThisMonth = rides.filter(r => r.departure_at && new Date(r.departure_at) >= monthStart && new Date(r.departure_at).getMonth() === monthStart.getMonth() && new Date(r.departure_at).getFullYear() === monthStart.getFullYear()).length
   const completed = rides.filter(r => r.status === 'completed')
   const totalDistance = completed.reduce((s, r) => s + (r.distance_km || 0), 0)
   const AVG_MILEAGE_KMPL = 15
@@ -562,18 +661,31 @@ export async function adminReports(companyId) {
   const activeRides = rides.filter(r => ['active', 'started', 'in_progress'].includes(r.status))
   const activeSeats = activeRides.reduce((sum, r) => sum + r.seats_available, 0)
   const sharedSeats = rides.reduce((sum, r) => sum + (r.seats_total - r.seats_available), 0)
+  const publishedSeats = rides.reduce((sum, r) => sum + (r.seats_total || 0), 0)
   const paidBookings = bookings.filter(b => b.status === 'payment_completed')
   const drivers = new Set(rides.map(r => r.driver_id)).size
-  const riders = new Set(bookings.map(b => b.rider_id)).size
+  const riders = new Set(bookings.filter(b => b.status !== 'cancelled').map(b => b.rider_id)).size
+  const locationCounts = field => {
+    const counts = {}
+    bookings.filter(b => b.status !== 'cancelled').forEach(b => {
+      const ride = col('rides').get(b.ride_id)
+      const location = ride?.[field]
+      if (!location?.address) return
+      const key = location.address.split(',')[0]
+      counts[key] = (counts[key] || 0) + (b.seats_booked || 1)
+    })
+    return Object.entries(counts).map(([name, seats]) => ({ name, seats })).sort((a, b) => b.seats - a.seats).slice(0, 5)
+  }
+  const locationInsights = { origins: locationCounts('start_location'), destinations: locationCounts('destination_location') }
   return {
-    totalEmployees: employees.length,
+    totalEmployees: employees.filter(user => user.role !== 'admin').length,
     totalVehicles: vehicles.length,
     ridesThisMonth,
     totalTrips: completed.length,
     totalDistance: +totalDistance.toFixed(1),
     fuelCost,
     costPerKm: cfg.cost_per_km,
-    utilization: rides.length ? Math.round((completed.length / rides.length) * 100) : 0,
+    utilization: publishedSeats ? Math.round((sharedSeats / publishedSeats) * 100) : 0,
     vehicleWise,
     totalBookings: bookings.filter(b => b.status !== 'cancelled').length,
     activeRides: activeRides.length,
@@ -583,6 +695,7 @@ export async function adminReports(companyId) {
     riders,
     revenue: +paidBookings.reduce((sum, b) => sum + b.fare, 0).toFixed(2),
     averageFare: paidBookings.length ? +(paidBookings.reduce((sum, b) => sum + b.fare, 0) / paidBookings.length).toFixed(2) : 0,
+    locationInsights,
   }
 }
 
@@ -601,9 +714,29 @@ export async function superadminListOrganizations() {
       employee_count: empCount,
       vehicle_count: col('vehicles').find(v => v.company_id === c._id).length,
       ride_count: col('rides').find(r => r.company_id === c._id).length,
-      status: 'active'
+      status: c.platform_status || 'active'
     }
   })
+}
+
+export async function superadminSetOrganizationStatus(companyId, status) {
+  const company = col('companies').get(companyId)
+  if (!company) throw new Error('Organization not found')
+  if (!['active', 'suspended'].includes(status)) throw new Error('Unsupported organization status')
+  const updated = col('companies').update(companyId, { platform_status: status })
+  notifyCompany(companyId, { type: 'platform', title: status === 'suspended' ? 'Organization access suspended' : 'Organization access restored', body: status === 'suspended' ? 'Your organization is temporarily unavailable.' : 'Your organization can access Ascend again.', link: '/app', icon: status === 'suspended' ? 'block' : 'check_circle' })
+  return updated
+}
+
+export async function superadminRotateJoinCode(companyId) {
+  const company = col('companies').get(companyId)
+  if (!company) throw new Error('Organization not found')
+  const used = new Set(col('companies').all().map(item => item.join_code))
+  let joinCode = ''
+  do { joinCode = Math.random().toString(36).slice(2, 8).toUpperCase() } while (used.has(joinCode))
+  const updated = col('companies').update(companyId, { join_code: joinCode })
+  col('users').find(user => user.company_id === companyId && user.role === 'admin').forEach(admin => notifyUser(admin._id, { type: 'platform', title: 'Join code rotated', body: `Your organization join code is now ${joinCode}.`, link: '/admin/settings', icon: 'key' }))
+  return updated
 }
 
 export async function superadminGetStats() {
@@ -617,6 +750,40 @@ export async function superadminGetStats() {
     total_bookings: col('bookings').all().length,
     active_users: users.filter(u => u.status === 'active').length,
     completed_rides: rides.filter(r => r.status === 'completed').length,
+  }
+}
+
+export async function superadminGetOperations() {
+  const [stats, organizations] = await Promise.all([superadminGetStats(), superadminListOrganizations()])
+  const users = col('users').all()
+  const vehicles = col('vehicles').all()
+  const rides = col('rides').all()
+  const bookings = col('bookings').all()
+  const companies = Object.fromEntries(organizations.map(org => [org._id, org.name]))
+  const userById = Object.fromEntries(users.map(user => [user._id, user]))
+
+  const recent = [
+    ...rides.map(ride => ({
+      id: 'ride-' + ride._id, icon: 'route', label: `${userById[ride.driver_id]?.name || 'Driver'} published a ride`,
+      detail: companies[ride.company_id] || 'Organization', status: ride.status, created_at: ride.created_at,
+    })),
+    ...bookings.map(booking => ({
+      id: 'booking-' + booking._id, icon: 'event_seat', label: `${userById[booking.rider_id]?.name || 'Rider'} booked a seat`,
+      detail: 'Ride booking', status: booking.status, created_at: booking.created_at,
+    })),
+  ].sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || ''))).slice(0, 6)
+
+  return {
+    stats,
+    organizations,
+    queues: {
+      pending_users: users.filter(user => user.status === 'pending_approval').length,
+      suspended_users: users.filter(user => ['suspended', 'deactivated'].includes(user.status)).length,
+      inactive_vehicles: vehicles.filter(vehicle => vehicle.status !== 'active').length,
+      active_rides: rides.filter(ride => ['active', 'started', 'in_progress'].includes(ride.status)).length,
+      payment_pending: bookings.filter(booking => booking.status === 'payment_pending').length,
+    },
+    recent,
   }
 }
 

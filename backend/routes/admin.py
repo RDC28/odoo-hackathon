@@ -116,13 +116,13 @@ def update_company(current_user):
     for key in ['name', 'industry', 'registered_address', 'admin_contact']:
         if key in data:
             setattr(company, key, data[key])
-    cfg = data.get('carpool_config', {})
-    if 'fuel_cost_per_liter' in cfg:
-        company.fuel_cost_per_liter = float(cfg['fuel_cost_per_liter'])
-    if 'cost_per_km' in cfg:
-        company.cost_per_km = float(cfg['cost_per_km'])
-    if 'travel_cost_operational_per_km' in cfg:
-        company.travel_cost_operational_per_km = float(cfg['travel_cost_operational_per_km'])
+    new_cfg = data.get('carpool_config', {})
+    if new_cfg:
+        cfg = dict(company.carpool_config or {})
+        for key in ['fuel_cost_per_liter', 'cost_per_km', 'travel_cost_operational_per_km']:
+            if key in new_cfg:
+                cfg[key] = float(new_cfg[key])
+        company.carpool_config = cfg  # reassign so SQLAlchemy notices the JSON change
     db.session.commit()
     return jsonify(company.to_dict())
 
@@ -131,6 +131,9 @@ def update_company(current_user):
 @require_admin
 def reports(current_user):
     company = Company.query.get(current_user.company_id)
+    config = company.carpool_config or {}
+    fuel_price = config.get('fuel_cost_per_liter', 100.0)
+
     employees = User.query.filter_by(company_id=current_user.company_id).all()
     vehicles = Vehicle.query.filter_by(company_id=current_user.company_id).all()
     rides = Ride.query.filter_by(company_id=current_user.company_id).all()
@@ -138,55 +141,78 @@ def reports(current_user):
         Ride.company_id == current_user.company_id
     ).all()
 
-    now = datetime.utcnow()
-    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    rides_this_month = sum(1 for r in rides if r.created_at and r.created_at >= month_start)
+    # Look up vehicles/owners once instead of re-querying inside loops
+    vehicle_by_id = {v._id: v for v in vehicles}
+    user_by_id = {u._id: u for u in employees}
 
+    month_start = datetime.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    rides_this_month = sum(1 for r in rides if r.departure_at and r.departure_at.year == month_start.year and r.departure_at.month == month_start.month)
+
+    AVG_MILEAGE = 15
     completed = [r for r in rides if r.status == 'completed']
     total_distance = sum(r.distance_km or 0 for r in completed)
-    AVG_MILEAGE = 15
-    fuel_cost = round(sum(
-        (r.distance_km or 0) / (Vehicle.query.get(r.vehicle_id).mileage_kmpl or AVG_MILEAGE)
-        * company.fuel_cost_per_liter
-        for r in completed
-    ))
+
+    fuel_cost = 0
+    for r in completed:
+        vehicle = vehicle_by_id.get(r.vehicle_id)
+        mileage = (vehicle.mileage_kmpl if vehicle else 0) or AVG_MILEAGE
+        fuel_cost += (r.distance_km or 0) / mileage * fuel_price
+    fuel_cost = round(fuel_cost)
 
     vehicle_wise = []
     for v in vehicles:
-        vr = [r for r in completed if r.vehicle_id == v._id]
-        km = sum(r.distance_km or 0 for r in vr)
-        owner = User.query.get(v.owner_id)
+        vehicle_rides = [r for r in completed if r.vehicle_id == v._id]
+        km = sum(r.distance_km or 0 for r in vehicle_rides)
+        owner = user_by_id.get(v.owner_id)
         vehicle_wise.append({
             **v.to_dict(),
             'owner': owner.to_dict() if owner else None,
-            'trips': len(vr),
+            'trips': len(vehicle_rides),
             'km': round(km, 1),
-            'cost': round((km / (v.mileage_kmpl or AVG_MILEAGE)) * company.fuel_cost_per_liter),
+            'cost': round(km / (v.mileage_kmpl or AVG_MILEAGE) * fuel_price),
         })
 
     active_rides = [r for r in rides if r.status in ['active', 'started', 'in_progress']]
     paid_bookings = [b for b in bookings if b.status == 'payment_completed']
-    shared_seats = sum((r.seats_total - r.seats_available) for r in rides)
-    drivers = len({r.driver_id for r in rides})
-    riders = len({b.rider_id for b in bookings if b.status != 'cancelled'})
     revenue = sum(b.fare for b in paid_bookings)
 
+    published_seats = sum(r.seats_total or 0 for r in rides)
+    shared_seats = sum((r.seats_total or 0) - (r.seats_available or 0) for r in rides)
+
+    def location_insights(field):
+        counts = {}
+        ride_by_id = {r._id: r for r in rides}
+        for booking in bookings:
+            if booking.status == 'cancelled':
+                continue
+            ride = ride_by_id.get(booking.ride_id)
+            location = getattr(ride, field, None) if ride else None
+            if not location or not location.get('address'):
+                continue
+            name = location['address'].split(',')[0]
+            counts[name] = counts.get(name, 0) + (booking.seats_booked or 1)
+        return [{'name': name, 'seats': seats} for name, seats in sorted(counts.items(), key=lambda item: item[1], reverse=True)[:5]]
+
     return jsonify({
-        'totalEmployees': len(employees),
+        'totalEmployees': len([u for u in employees if u.role != 'admin']),
         'totalVehicles': len(vehicles),
         'ridesThisMonth': rides_this_month,
         'totalTrips': len(completed),
         'totalDistance': round(total_distance, 1),
         'fuelCost': fuel_cost,
-        'costPerKm': company.cost_per_km,
-        'utilization': round((len(completed) / len(rides) * 100) if rides else 0),
+        'costPerKm': config.get('cost_per_km', 10.0),
+        'utilization': round((shared_seats / published_seats * 100) if published_seats else 0),
         'vehicleWise': vehicle_wise,
         'totalBookings': len([b for b in bookings if b.status != 'cancelled']),
         'activeRides': len(active_rides),
         'activeSeats': sum(r.seats_available for r in active_rides),
         'sharedSeats': shared_seats,
-        'drivers': drivers,
-        'riders': riders,
+        'drivers': len({r.driver_id for r in rides}),
+        'riders': len({b.rider_id for b in bookings if b.status != 'cancelled'}),
         'revenue': round(revenue, 2),
         'averageFare': round(revenue / len(paid_bookings), 2) if paid_bookings else 0,
+        'locationInsights': {
+            'origins': location_insights('start_location'),
+            'destinations': location_insights('destination_location'),
+        },
     })

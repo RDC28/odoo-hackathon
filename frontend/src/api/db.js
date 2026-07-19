@@ -2,7 +2,9 @@
 // Documents are shaped exactly like docs/data-model.md so the later swap is mechanical:
 // each api.js function becomes a fetch() to the matching Flask endpoint.
 
-const KEY = 'carpool_db_v1'
+// Bump this when the bundled demo dataset changes so an existing browser
+// cannot silently keep an older, much smaller local database.
+const KEY = 'carpool_db_v5'
 
 function load() {
   try { return JSON.parse(localStorage.getItem(KEY) || '{}') } catch { return {} }

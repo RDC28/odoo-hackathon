@@ -38,7 +38,7 @@ export function seedDemo() {
       company_id: company._id, name, email, phone: '+91 9800000000',
       password: 'demo123', role, status: 'active', has_onboarded: true,
       department, wallet_balance: role === 'admin' ? 0 : 800,
-      rating_avg: role === 'admin' ? 0 : 4.7, rating_count: role === 'admin' ? 0 : 8,
+      rating_avg: 0, rating_count: 0,
     })
     accounts.push({
       label: company.name + ' · ' + (role === 'admin' ? 'Admin' : name),
@@ -47,11 +47,27 @@ export function seedDemo() {
     return user
   }
 
+  const vehicleImage = (type, model) => {
+    const image = type === 'bike'
+      ? 'photo-1558981806-ec527fa84c39'
+      : model.includes('Nexon') ? 'photo-1492144534655-ae79c964c9d7'
+        : model.includes('City') ? 'photo-1553440569-bcc63803a83d'
+          : model.includes('Ertiga') || model.includes('Creta') ? 'photo-1544829099-b9a0c07fad1a'
+            : model.includes('i10') || model.includes('Alto') ? 'photo-1502877338535-766e1452684a'
+              : 'photo-1549317661-bd32c8ce0db2'
+    return `https://images.unsplash.com/${image}?auto=format&fit=crop&w=640&q=80`
+  }
+
   const makeVehicle = (company, owner, type, model, registration_number, seating_capacity, mileage_kmpl) =>
-    col('vehicles').insert({
+    (() => {
+      const vehicle = col('vehicles').insert({
       company_id: company._id, owner_id: owner._id, type, model,
-      registration_number, seating_capacity, mileage_kmpl, status: 'active',
-    })
+      registration_number, seating_capacity, mileage_kmpl, photo: vehicleImage(type, model), status: 'active',
+      })
+      const rating = +(4.4 + (owner.name.length % 6) * 0.1).toFixed(1)
+      col('users').update(owner._id, { rating_avg: rating, rating_count: 6 + (owner.name.length % 15) })
+      return vehicle
+    })()
 
   const makeRide = (company, driver, vehicle, start, destination, hour, seats, price, addDays = 0, recurring_days = []) =>
     col('rides').insert({
@@ -78,6 +94,25 @@ export function seedDemo() {
     return { booking, conversation }
   }
 
+  const demoLocations = [
+    ISKCON, INFOCITY, BOPAL, SATELLITE, SG_HIGHWAY, GIFT,
+    { address: 'Prahlad Nagar, Ahmedabad', lat: 23.0124, lng: 72.5101 },
+    { address: 'Vastrapur, Ahmedabad', lat: 23.0395, lng: 72.5293 },
+    { address: 'Thaltej, Ahmedabad', lat: 23.0505, lng: 72.5070 },
+    { address: 'Navrangpura, Ahmedabad', lat: 23.0350, lng: 72.5600 },
+    { address: 'Paldi, Ahmedabad', lat: 23.0120, lng: 72.5620 },
+    { address: 'Motera, Ahmedabad', lat: 23.0932, lng: 72.5970 },
+    { address: 'Chandkheda, Ahmedabad', lat: 23.1090, lng: 72.5850 },
+    { address: 'Raysan, Gandhinagar', lat: 23.1830, lng: 72.6380 },
+  ]
+  const vehicleSpecs = [
+    ['car', 'Maruti Suzuki Swift', 4, 18.2],
+    ['car', 'Hyundai Grand i10', 4, 17.5],
+    ['car', 'Tata Nexon', 4, 16.8],
+    ['car', 'Honda City', 4, 15.2],
+    ['van', 'Maruti Ertiga', 6, 14.1],
+  ]
+
   const company = makeCompany(companies[0])
   const admin = makeUser(company, 'Amit Shah', 'admin@demo.com', 'Administration', 'admin')
   const raj = makeUser(company, 'Raj Patel', 'raj@demo.com', 'Engineering')
@@ -100,6 +135,7 @@ export function seedDemo() {
   makeBooking(rajRide, arjun, 1)
   const history = makeBooking(completedRide, priya, 1, 'payment_completed')
   col('messages').insert({ conversation_id: history.conversation._id, sender_id: priya._id, content: 'Thanks for the ride!' })
+  col('ratings').insert({ booking_id: history.booking._id, rater_id: priya._id, ratee_id: raj._id, stars: 5, comment: 'Smooth ride and a very helpful driver.' })
 
   ;[
     [admin, 'Office', INFOCITY], [raj, 'Home', ISKCON], [raj, 'Office', INFOCITY],
@@ -108,6 +144,38 @@ export function seedDemo() {
     [priya, 'Home', ISKCON], [priya, 'Office', INFOCITY],
     [arjun, 'Home', BOPAL], [arjun, 'Office', INFOCITY],
   ].forEach(([user, label, place]) => col('saved_places').insert({ user_id: user._id, label, ...place }))
+
+  // A dense local network keeps the canonical demo rider's map populated.
+  ;[[raj, dzire], [krishna, alto], [neha, scooter]].forEach(([driver, vehicle], driverIndex) => {
+    for (let rideIndex = 0; rideIndex < 7; rideIndex += 1) {
+      const ride = makeRide(
+        company, driver, vehicle,
+        demoLocations[(driverIndex + rideIndex + 1) % demoLocations.length],
+        demoLocations[(driverIndex + rideIndex + 4) % demoLocations.length],
+        7 + ((driverIndex + rideIndex) % 4), vehicle.seating_capacity,
+        85 + (rideIndex % 4) * 15, rideIndex % 2,
+        ['Mo', 'Tu', 'We', 'Th', 'Fr'],
+      )
+      if (rideIndex % 4 === 0) makeBooking(ride, [priya, arjun][(driverIndex + rideIndex) % 2])
+    }
+  })
+
+  // Golden-path showcase data: Priya can search ISKCON Cross Road ->
+  // Infocity today and see a dense, varied set of nearby driver pins.
+  const showcaseStarts = [ISKCON, SATELLITE, demoLocations[7], demoLocations[9], BOPAL, SG_HIGHWAY]
+  const showcaseDestinations = [INFOCITY, GIFT, demoLocations[13], INFOCITY, GIFT, demoLocations[13]]
+  ;[[raj, dzire], [krishna, alto], [neha, scooter]].forEach(([driver, vehicle], driverIndex) => {
+    for (let showcaseIndex = driverIndex; showcaseIndex < 12; showcaseIndex += 3) {
+      makeRide(
+        company, driver, vehicle,
+        showcaseStarts[showcaseIndex % showcaseStarts.length],
+        showcaseDestinations[showcaseIndex % showcaseDestinations.length],
+        8 + (showcaseIndex % 8), vehicle.seating_capacity,
+        90 + (showcaseIndex % 5) * 10, 0,
+        ['Mo', 'Tu', 'We', 'Th', 'Fr'],
+      )
+    }
+  })
 
   const secondCompany = makeCompany(companies[1])
   const acmeAdmin = makeUser(secondCompany, 'Maya Rao', 'admin@acme01.com', 'Administration', 'admin')
@@ -129,11 +197,92 @@ export function seedDemo() {
   col('saved_places').insert({ user_id: sara._id, label: 'Office', ...GIFT })
   col('saved_places').insert({ user_id: dev._id, label: 'Home', ...SATELLITE })
 
-  col('users').insert({
+  const generatedCompanies = [
+    { name: 'Vertex Mobility', industry: 'Mobility', address: 'Prahlad Nagar, Ahmedabad', code: 'VERTEX26' },
+    { name: 'Nimbus Analytics', industry: 'Analytics', address: 'Vastrapur, Ahmedabad', code: 'NIMBUS26' },
+    { name: 'Greenfield Foods', industry: 'Food Services', address: 'Thaltej, Ahmedabad', code: 'GREEN26' },
+  ]
+  const generatedNames = [
+    'Aarav Mehta', 'Ishita Shah', 'Kabir Joshi', 'Meera Patel',
+    'Vihaan Desai', 'Anaya Rao', 'Aditya Trivedi', 'Kiara Mehta',
+    'Yash Kapoor', 'Riya Soni', 'Dhruv Parmar', 'Tara Shah',
+  ]
+  const generatedDepartments = ['Engineering', 'Operations', 'Sales', 'Design', 'Finance', 'Human Resources']
+
+  generatedCompanies.forEach((config, companyIndex) => {
+    const generatedCompany = makeCompany(config)
+    const employees = []
+    makeUser(generatedCompany, `${config.name} Admin`, `admin@${config.code.toLowerCase()}.com`, 'Administration', 'admin')
+    generatedNames.forEach((name, personIndex) => {
+      const email = `${name.toLowerCase().replaceAll(' ', '.')}.${companyIndex + 3}@demo.ascend.local`
+      const employee = makeUser(generatedCompany, name, email, generatedDepartments[personIndex % generatedDepartments.length])
+      employees.push(employee)
+      col('saved_places').insert({ user_id: employee._id, label: 'Home', ...demoLocations[(personIndex + companyIndex) % demoLocations.length] })
+      col('saved_places').insert({ user_id: employee._id, label: 'Office', ...demoLocations[(personIndex + companyIndex + 1) % demoLocations.length] })
+    })
+
+    const drivers = employees.slice(0, 6)
+    const riders = employees.slice(6)
+    const vehicles = drivers.map((driver, vehicleIndex) => {
+      const spec = vehicleSpecs[vehicleIndex % vehicleSpecs.length]
+      return makeVehicle(
+        generatedCompany, driver, spec[0], spec[1],
+        `GJ${String(companyIndex + 7).padStart(2, '0')}${String(vehicleIndex + 1).padStart(2, '0')}D${companyIndex}${vehicleIndex}`,
+        spec[2], spec[3],
+      )
+    })
+
+    drivers.forEach((driver, driverIndex) => {
+      const vehicle = vehicles[driverIndex]
+      for (let rideIndex = 0; rideIndex < 8; rideIndex += 1) {
+        const ride = makeRide(
+          generatedCompany, driver, vehicle,
+          demoLocations[(driverIndex + rideIndex + companyIndex) % demoLocations.length],
+          demoLocations[(driverIndex + rideIndex + 3 + companyIndex) % demoLocations.length],
+          7 + ((driverIndex + rideIndex) % 4), vehicle.seating_capacity,
+          75 + (rideIndex % 5) * 15, rideIndex % 3,
+          ['Mo', 'Tu', 'We', 'Th', 'Fr'],
+        )
+        if (rideIndex % 3 === 0) makeBooking(ride, riders[(driverIndex + rideIndex) % riders.length])
+        if (rideIndex === 1) makeBooking(ride, riders[(driverIndex + rideIndex + 1) % riders.length])
+      }
+      for (let historyIndex = 0; historyIndex < 3; historyIndex += 1) {
+        const history = makeRide(
+          generatedCompany, driver, vehicle,
+          demoLocations[(driverIndex + historyIndex + 2) % demoLocations.length],
+          demoLocations[(driverIndex + historyIndex + 5) % demoLocations.length],
+          8 + historyIndex, vehicle.seating_capacity,
+          80 + historyIndex * 10, -(historyIndex + 1), [],
+        )
+        const historyBooking = makeBooking(history, riders[(driverIndex + historyIndex) % riders.length], 1, 'payment_completed')
+        col('rides').update(history._id, { status: 'completed' })
+        col('messages').insert({ conversation_id: historyBooking.conversation._id, sender_id: historyBooking.booking.rider_id, content: 'Thanks for the smooth ride!' })
+      }
+    })
+  })
+
+  const suspended = makeUser(company, 'Demo Suspended User', 'suspended@demo.com', 'Operations')
+  col('users').update(suspended._id, { status: 'suspended' })
+  const inactiveVehicle = makeVehicle(company, suspended, 'car', 'Demo Inactive Car', 'GJ99ZZ0001', 4, 14)
+  col('vehicles').update(inactiveVehicle._id, { status: 'inactive' })
+  col('users').update(suspended._id, { rating_avg: 0, rating_count: 0 })
+
+  const superAdmin = col('users').insert({
     company_id: null, name: 'Super Admin', email: 'superadmin@platform.com',
     phone: '', password: 'superadmin123', role: 'superadmin', status: 'active',
     department: 'Platform Operations', wallet_balance: 0, rating_avg: 0, rating_count: 0,
   })
+
+  const addNotice = (user, type, title, body, link, icon = 'notifications') => col('notifications').insert({
+    user_id: user._id, type, title, body, link, icon, read: false,
+  })
+  addNotice(priya, 'booking', 'Booking request sent', 'Your seat request to Infocity is waiting for driver approval.', '/app/trips', 'event_seat')
+  addNotice(priya, 'payment', 'Payment available', 'Your completed Infocity trip is ready for payment.', '/app/trips', 'payments')
+  addNotice(raj, 'approval', 'Passenger approval needed', 'A passenger is waiting for your approval before the ride can start.', '/app/trips', 'person_check')
+  addNotice(admin, 'admin', 'Review employee access', 'Pending and suspended employee accounts are ready for review.', '/admin/employees', 'manage_accounts')
+  addNotice(admin, 'admin', 'Fleet snapshot ready', 'Review registered vehicles and their operating details.', '/admin/vehicles', 'directions_car')
+  addNotice(superAdmin, 'platform', 'Platform operations ready', 'Review organization health and recent activity.', '/superadmin/overview', 'monitoring')
+  addNotice(superAdmin, 'platform', 'Organization directory updated', 'The seeded platform now includes multiple tenant workspaces.', '/superadmin/organizations', 'business')
 
   return { joinCode: company.join_code, joinCodes: companies.map(c => c.code), accounts, organizations: companies.map(c => c.name) }
 }

@@ -1,46 +1,47 @@
-# Enterprise Carpooling Platform — Technical Documentation
+# Ascend documentation
 
-This is the technical documentation for the Enterprise Carpooling Platform: an internal
-app that lets employees of a company offer and find rides with each other, tracks trips
-and payments, gives admins oversight of employees/vehicles, and (new) gives employees a
-Discord-style chat system for talking to each other.
+Ascend is a closed-organization carpooling prototype. Employees can publish and
+find rides inside their own organization, preview routes on a map, book seats,
+communicate with the other people on a booked ride, simulate tracking, and pay
+through wallet, cash, or Razorpay Test Mode. Organization admins manage their
+workspace; the platform super admin manages organization access.
 
-Sources:
-- Problem statement: [`Carpooling Platform (1).pdf`](../Carpooling%20Platform%20(1).pdf) — the hackathon brief this design must satisfy (see [requirements-mapping.md](requirements-mapping.md) for the checklist)
-- Wireframe: [`Carpooling Platform - 24 hours.svg`](../Carpooling%20Platform%20-%2024%20hours.svg) (Excalidraw, employee app + admin dashboard)
-- Product reference: **BlaBlaCar** — the closest real-world product. We borrow its proven patterns: per-seat pricing, instant booking, driver profile with ratings, recurring commute rides and in-app rider↔driver messaging — adapted to a closed enterprise context (only verified employees of the same company).
+## Start here
 
-## Stack
+- [Current product state](current-state.md) — canonical implementation and demo guide
+- [Screens and flows](screens-flows.md) — role-based navigation and lifecycle
+- [Requirements mapping](requirements-mapping.md) — problem statement coverage
+- [Architecture](architecture.md) — current prototype architecture and production path
+- [Data model](data-model.md) — localStorage and backend record shapes
+- [API reference](api-reference.md) — endpoint contract for the backend swap
+- [Chat system](chat-system.md) — ride-scoped messaging rules
 
-| Layer | Choice |
-|---|---|
-| Mobile/employee app | React (React Native) |
-| Admin web dashboard | React |
-| Backend API | Python + Flask |
-| Realtime (chat, live tracking) | Flask-SocketIO |
-| Database | MongoDB |
-| Maps / geocoding / routing | Leaflet + OpenStreetMap tiles, Nominatim (geocoding), OSRM (routing) |
-| Payments | Razorpay **Test Mode** (card/UPI sandbox, per the problem statement) + internal wallet |
-| Auth | JWT (access + refresh) |
+## Repository map
 
-## Documents
+```text
+frontend/   React + Vite employee, organization-admin, and super-admin prototype
+backend/    Flask + SQLAlchemy API, reports, payments, and atomic booking route
+docs/       Product, architecture, data, API, and demo documentation
+```
 
-1. [Architecture](architecture.md) — system diagram, services, repo layout, deployment
-2. [Data Model](data-model.md) — MongoDB collections and their fields
-3. [API Reference](api-reference.md) — REST endpoints, grouped by module
-4. [Chat System](chat-system.md) — the Discord-like employee chat (global channel + DMs) and how it folds in the wireframe's existing "Chat with Driver" ride chat
-5. [Screens & Flows](screens-flows.md) — every screen from the wireframe mapped to its purpose and backing endpoints
-6. [Requirements Mapping](requirements-mapping.md) — problem-statement mandatory/bonus features → where each is covered in this design
+## Important prototype boundary
 
-## Core domain, in one paragraph
+Normal frontend flows currently use a deterministic localStorage data layer so the
+prototype can run without a database. Razorpay order creation and payment
+verification call the Flask backend. The backend already contains the production
+seat-reservation pattern: a conditional atomic decrement followed by booking
+creation in one transaction. The localStorage layer is intentionally not a real
+concurrency boundary.
 
-A **company** has **employees** (users), some of whom register **vehicles**. An employee
-with a vehicle can **offer a ride** (publish start/destination, time, seats, per-seat
-fare — BlaBlaCar-style); other employees can **find a ride** and **book** seats on it
-(one driver, one or more passengers). Bookings become **trips** with a defined lifecycle
-(booked → started → in progress → completed → payment pending → payment completed),
-are tracked live on a map while active, paid via **wallet/cash/card/UPI** (Razorpay
-test mode), and logged to **ride history** which feeds the **reports** dashboard.
-Admins manage employee access, vehicle approval, and company-wide settings/reports.
-Employees can also **chat** with each other — one-to-one, or in a single company-wide
-channel — independently of any ride, plus a per-trip chat with their driver/rider.
+## Demo accounts
+
+Use the login page's demo dropdown, or load demo data from the landing page:
+
+| Role | Email | Password |
+|---|---|---|
+| Employee rider | `priya@demo.com` | `demo123` |
+| Employee driver | `raj@demo.com` | `demo123` |
+| Organization admin | `admin@demo.com` | `demo123` |
+| Platform super admin | `superadmin@platform.com` | `superadmin123` |
+
+Organization join codes in the seeded demo include `DEMO01` and `ACME01`.

@@ -1,125 +1,75 @@
-# API Reference
+# API reference
 
-Base URL: `/api`. Auth via `Authorization: Bearer <jwt>` unless noted. All list
-endpoints are scoped to the caller's `company_id` automatically.
+The frontend mock API in `frontend/src/api/api.js` mirrors these contracts. The
+Flask backend is the intended production source of truth; exact route prefixes are
+shown as `/api`.
 
-## Auth
+## Auth and organizations
 
-| Method | Path | Description |
+| Method | Endpoint | Purpose |
 |---|---|---|
-| POST | `/auth/signup` | Create account (name, email/phone, password, photo) |
-| POST | `/auth/login` | Email/mobile + password → access + refresh token |
-| POST | `/auth/refresh` | Exchange refresh token for a new access token |
-| POST | `/auth/logout` | Invalidate refresh token |
+| POST | `/auth/login` | Authenticate an employee, admin, or super admin |
+| POST | `/auth/signup` | Create a pending employee account using a join code |
+| POST | `/organizations` | Create an organization and its first admin |
+| GET | `/users/me` | Current profile and organization |
 
-## Users / Profile
+## Rides and bookings
 
-| Method | Path | Description |
+| Method | Endpoint | Purpose |
 |---|---|---|
-| GET | `/users/me` | Current user profile |
-| PUT | `/users/me` | Update profile fields |
-| POST | `/users/me/photo` | Upload profile photo |
+| GET | `/rides/search` | Tenant-scoped ride search |
+| POST | `/rides` | Publish a ride after vehicle/capacity validation |
+| PUT | `/rides/:id/start` | Driver starts an approved ride |
+| PUT | `/rides/:id/complete` | Driver manually completes a ride |
+| POST | `/bookings` | Atomically reserve seats and create a booking |
+| GET | `/bookings` | Current user's bookings |
+| GET | `/bookings/:id` | Booking details and ride chat reference |
+| PUT | `/bookings/:id/cancel` | Cancel/reject a booking and restore seats where applicable |
+| PUT | `/bookings/:id/approve` | Driver approval before start |
 
-## Saved Places (Settings > Saved Places)
+`POST /bookings` returns `409 Conflict` when the conditional seat decrement affects
+zero rows. Clients should refresh results and show the user that availability
+changed. Production clients should also send an idempotency key.
 
-| Method | Path | Description |
+## Maps
+
+| Operation | Provider |
+|---|---|
+| Address search/reverse geocode | Nominatim |
+| Tiles and markers | Leaflet + OpenStreetMap |
+| Route geometry/distance/ETA | OSRM |
+
+## Vehicles, places, wallet, and history
+
+| Method | Endpoint | Purpose |
 |---|---|---|
-| GET | `/saved-places` | List my saved places (Home, Office, ...) |
-| POST | `/saved-places` | Save a place (label + address + lat/lng) |
-| DELETE | `/saved-places/:id` | Remove a saved place |
+| GET/POST | `/vehicles` | List or register a vehicle |
+| PUT/DELETE | `/vehicles/:id` | Edit or remove a vehicle |
+| GET/POST | `/saved-places` | List or save a user place |
+| PUT/DELETE | `/saved-places/:id` | Edit or remove a saved place |
+| GET | `/wallet` | Wallet balance and transactions |
+| POST | `/wallet/recharge` | Add demo wallet funds |
+| GET | `/bookings/history` | Completed trip history |
+| GET | `/admin/reports` | Organization-admin analytics |
 
-## Vehicles (My Vehicle screen)
+## Payments
 
-| Method | Path | Description |
+| Method | Endpoint | Purpose |
 |---|---|---|
-| GET | `/vehicles` | List my vehicles |
-| POST | `/vehicles` | Add vehicle |
-| GET | `/vehicles/:id` | Vehicle detail |
-| PUT | `/vehicles/:id` | Edit vehicle |
-| DELETE | `/vehicles/:id` | Remove vehicle |
+| POST | `/payments/razorpay/order` | Create a Test Mode order server-side |
+| POST | `/payments/razorpay/verify` | Verify the payment signature server-side |
+| POST | `/payments/charge` | Complete wallet or cash payment |
 
-## Rides (Offer Ride / Find Ride)
+Razorpay secrets are backend environment variables only. Never put the secret in
+frontend source or browser storage.
 
-| Method | Path | Description |
+## Ride chat
+
+| Method | Endpoint | Purpose |
 |---|---|---|
-| POST | `/rides` | Publish a ride (Offer Ride → Publish Ride). Rejected unless the driver has ≥1 registered vehicle |
-| GET | `/rides/search?start=&dest=&date=&time=&seats=&recurring=` | Find Ride — matching available rides, sorted by departure-time proximity (driver rating shown per card) |
-| GET | `/rides/:id` | Ride detail |
-| DELETE | `/rides/:id` | Cancel a published ride |
-| GET | `/rides/route-preview?start=&dest=` | Route polyline via OSRM for Route Confirmation screen |
+| GET | `/chat/conversations` | Current user's ride conversations |
+| GET | `/chat/conversations/:id/messages` | Paginated ride messages |
+| POST | `/chat/conversations/:id/messages` | Send a participant-authorized message |
 
-## Bookings (My Trips / Ride History / Track Ride)
-
-| Method | Path | Description |
-|---|---|---|
-| POST | `/bookings` | Book Now on a ride |
-| GET | `/bookings/my-trips` | Active/upcoming trips |
-| GET | `/bookings/history` | Completed trips (Ride History) |
-| GET | `/bookings/:id` | Trip detail (driver, vehicle, route) |
-| PATCH | `/bookings/:id/status` | Advance the trip lifecycle: `booked → started → in_progress → completed → payment_pending → payment_completed` (driver drives start/finish; payment endpoints drive the last hop) |
-| POST | `/bookings/:id/cancel` | Cancel a booking; frees the ride's seats (bonus feature) |
-| GET | `/bookings/:id/track` | Latest driver location + ETA (also pushed live via socket) |
-| POST | `/bookings/:id/rating` | Rate the driver 1–5 after completion (bonus, BlaBlaCar-style) |
-
-### Socket.IO events — live tracking (namespace `/tracking`)
-
-Active only between trip `started` and `completed` (per the problem statement, live
-location sharing is enabled only while a trip is active).
-
-| Direction | Event | Payload |
-|---|---|---|
-| driver → server | `location:ping` | `{ ride_id, lat, lng, speed_kmh }` |
-| server → riders on the trip | `location:update` | `{ ride_id, lat, lng, eta_minutes, status }` |
-| server → all participants | `trip:status` | `{ ride_id, status }` on every lifecycle change |
-
-## Payments & Wallet
-
-| Method | Path | Description |
-|---|---|---|
-| POST | `/payments/order` | Create a Razorpay **Test Mode** order for card/UPI (returns `order_id` for the client SDK) |
-| POST | `/payments/verify` | Verify the Razorpay signature callback, mark booking `payment_completed` |
-| POST | `/payments/charge` | Pay Now via wallet (debits balance) or record a cash payment |
-| GET | `/payments/:booking_id` | Payment status for a booking |
-| GET | `/wallet` | Wallet balance + transaction history |
-| POST | `/wallet/recharge` | Recharge Wallet — creates a Razorpay test order, credits balance on verify |
-
-Card/UPI never touch real money: everything runs against the Razorpay sandbox as the
-problem statement requires. Wallet and cash are handled entirely internally.
-
-## Admin
-
-| Method | Path | Description |
-|---|---|---|
-| GET | `/admin/employees` | Employees tab list |
-| POST | `/admin/employees` | + Add Employee |
-| PATCH | `/admin/employees/:id/access` | Grant/Revoke platform access |
-| GET | `/admin/vehicles` | Vehicles tab list |
-| PATCH | `/admin/vehicles/:id/status` | Activate/deactivate a vehicle |
-| GET | `/admin/settings` | Company details + carpool config |
-| PUT | `/admin/settings` | Save Settings |
-| GET | `/admin/reports` | Reports & Analytics: total trips, total distance travelled, fuel consumption, cost per km, vehicle-wise cost analysis, fuel-efficiency trends, monthly financial summary (fuel/cost figures derived from `location_pings` distance × the company's `carpool_config` rates) |
-
-## Chat
-
-REST covers history/bootstrap; live delivery is over Socket.IO (see
-[chat-system.md](chat-system.md)).
-
-| Method | Path | Description |
-|---|---|---|
-| GET | `/chat/conversations` | All conversations for me: global channel, my DMs, active ride chats |
-| GET | `/chat/conversations/global` | Get (or lazily create) my company's global channel |
-| POST | `/chat/conversations/dm` | `{ user_id }` → find-or-create a DM with that employee |
-| GET | `/chat/conversations/:id/messages?before=&limit=50` | Paginated history, newest-first |
-| POST | `/chat/conversations/:id/messages` | Send a message (REST fallback; primary path is the socket event) |
-| POST | `/chat/conversations/:id/read` | Mark conversation read up to a message id |
-
-### Socket.IO events (namespace `/chat`)
-
-| Direction | Event | Payload |
-|---|---|---|
-| client → server | `join` | `{ conversation_id }` |
-| client → server | `message:send` | `{ conversation_id, content, attachment_url? }` |
-| server → clients in room | `message:new` | full message document |
-| client → server | `typing:start` / `typing:stop` | `{ conversation_id }` |
-| server → clients in room | `typing:update` | `{ conversation_id, user_id, typing }` |
-| server → client | `presence:update` | `{ user_id, online }` |
+Messages are rejected after cancellation/completion. A future WebSocket layer may
+emit new messages, but it must preserve the same participant and lifecycle checks.

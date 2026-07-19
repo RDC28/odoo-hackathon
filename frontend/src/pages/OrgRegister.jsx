@@ -39,6 +39,16 @@ export default function OrgRegister() {
   return (
     <div className="auth-page">
       <form className="auth-card" onSubmit={submit}>
+        <div className="auth-path-switch" aria-label="Choose account type">
+          <Link className="auth-path-option" to="/signup">
+            <span className="material-symbols-rounded">person_add</span>
+            <div><strong>Employee sign up</strong><small>Join an existing workspace</small></div>
+          </Link>
+          <div className="auth-path-option active">
+            <span className="material-symbols-rounded">business</span>
+            <div><strong>Register organization</strong><small>Create a new workspace</small></div>
+          </div>
+        </div>
         <h2>Register Organization</h2>
         <p className="muted">Create your company workspace and its admin account.</p>
         <div className="field"><label>Company name</label><input required value={f.companyName} onChange={set('companyName')} placeholder="Odoo Pvt. Ltd." /></div>

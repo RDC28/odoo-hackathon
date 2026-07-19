@@ -56,6 +56,7 @@ export default function MapView({
   useEffect(() => { onMapPickRef.current = onMapPick }, [onMapPick])
   useEffect(() => { onMarkerDragRef.current = onMarkerDrag }, [onMarkerDrag])
 
+  // The Leaflet map is created once; refs let its stable handlers use the latest callbacks.
   useEffect(() => {
     const map = L.map(divRef.current, {
       zoomControl: true,
@@ -93,6 +94,7 @@ export default function MapView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Stringifying marker content avoids rebuilding layers when callers create a new array with unchanged markers.
   useEffect(() => {
     const map = mapRef.current
     const layer = layerRef.current

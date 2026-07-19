@@ -39,6 +39,7 @@ export default function Chat() {
       loadConvs()
       if (activeId) api.getMessages(activeId, user._id).then(setMessages).catch(() => {})
     }
+    // Another tab writing localStorage triggers this listener as our prototype realtime channel.
     window.addEventListener('storage', onStorage)
     return () => window.removeEventListener('storage', onStorage)
   }, [activeId, user._id])

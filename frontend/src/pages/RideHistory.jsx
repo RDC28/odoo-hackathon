@@ -1,5 +1,6 @@
 ﻿import { useEffect, useState } from 'react'
 import * as api from '../api/api'
+import { formatDateTime, shortAddress } from '../utils'
 import { useAuth } from '../context/AuthContext'
 
 export default function RideHistory() {
@@ -17,9 +18,9 @@ export default function RideHistory() {
       {h.asRider.map(b => (
         <div key={b._id} className="card ride-card">
           <div>
-            <strong>{b.pickup_point.address.split(',')[0]} → {b.drop_point.address.split(',')[0]}</strong>
+               <strong>{shortAddress(b.pickup_point.address)} → {shortAddress(b.drop_point.address)}</strong>
             <div className="muted">
-               {b.ride ? new Date(b.ride.departure_at).toLocaleString() : ''} · driver {b.driver ? b.driver.name : '—'}
+               {formatDateTime(b.ride?.departure_at)} · driver {b.driver ? b.driver.name : '—'}
               {b.vehicle && <> · {b.vehicle.model} ({b.vehicle.registration_number})</>}
             </div>
           </div>
@@ -32,9 +33,9 @@ export default function RideHistory() {
       {h.asDriver.map(r => (
         <div key={r._id} className="card ride-card">
           <div>
-            <strong>{r.start_location.address.split(',')[0]} → {r.destination_location.address.split(',')[0]}</strong>
+               <strong>{shortAddress(r.start_location.address)} → {shortAddress(r.destination_location.address)}</strong>
             <div className="muted">
-               {new Date(r.departure_at).toLocaleString()} · {r.vehicle ? `${r.vehicle.model} (${r.vehicle.registration_number})` : ''} · {r.passengers} passenger{r.passengers !== 1 ? 's' : ''} · {r.distance_km || '—'} km
+               {formatDateTime(r.departure_at)} · {r.vehicle ? `${r.vehicle.model} (${r.vehicle.registration_number})` : ''} · {r.passengers} passenger{r.passengers !== 1 ? 's' : ''} · {r.distance_km || '—'} km
             </div>
           </div>
           <div className="ride-card-right"><div className="fare">+ ₹ {r.earned}</div><span className="badge badge-green">completed</span></div>

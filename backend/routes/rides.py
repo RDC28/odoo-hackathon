@@ -1,4 +1,3 @@
-import json
 from datetime import datetime
 from flask import Blueprint, request, jsonify
 from models import db
@@ -12,6 +11,30 @@ from utils.auth_middleware import require_auth
 rides_bp = Blueprint('rides', __name__, url_prefix='/api/rides')
 
 WEEKDAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
+
+
+def _enrich_ride(ride):
+    """Ride dict + its driver and vehicle details (for ride cards in the UI)."""
+    d = ride.to_dict()
+    driver = User.query.get(ride.driver_id)
+    vehicle = Vehicle.query.get(ride.vehicle_id)
+    d['driver'] = driver.to_dict() if driver else None
+    d['vehicle'] = vehicle.to_dict() if vehicle else None
+    return d
+
+
+def _set_ride_and_bookings(ride_id, ride_status, booking_status, skip_booking_statuses):
+    """Move a ride and its bookings to a new status (skipping some bookings)."""
+    ride = Ride.query.get(ride_id)
+    if not ride:
+        return
+    ride.status = ride_status
+    query = Booking.query.filter(Booking.ride_id == ride_id)
+    if skip_booking_statuses:
+        query = query.filter(~Booking.status.in_(skip_booking_statuses))
+    for b in query.all():
+        b.status = booking_status
+    db.session.commit()
 
 
 @rides_bp.route('', methods=['POST'])
@@ -37,18 +60,18 @@ def publish_ride(current_user):
         company_id=current_user.company_id,
         driver_id=current_user._id,
         vehicle_id=vehicle._id,
+        start_location=data.get('start_location'),
+        destination_location=data.get('destination_location'),
         departure_at=data.get('departure_at', ''),
+        recurring_days=data.get('recurring_days', []),
         seats_total=seats,
         seats_available=seats,
         price_per_seat=price,
+        route_coords=data.get('route_coords'),
         distance_km=data.get('distance_km'),
         duration_min=data.get('duration_min'),
         status='active',
     )
-    ride.start_location = data.get('start_location')
-    ride.destination_location = data.get('destination_location')
-    ride.recurring_days = data.get('recurring_days', [])
-    ride.route_coords = data.get('route_coords')
     db.session.add(ride)
     db.session.commit()
     return jsonify(ride.to_dict()), 201
@@ -79,22 +102,20 @@ def search_rides(current_user):
     results = []
     for r in rides:
         same_day = r.departure_at[:10] == date
-        recurring_match = weekday in r.recurring_days
+        recurring_match = weekday in (r.recurring_days or [])
         if not (same_day or recurring_match):
             continue
         if haversine_km(r.start_location, from_loc) > MAX_KM:
             continue
         if haversine_km(r.destination_location, to_loc) > MAX_KM:
             continue
+        results.append(_enrich_ride(r))
 
-        rd = r.to_dict()
-        driver = User.query.get(r.driver_id)
-        vehicle = Vehicle.query.get(r.vehicle_id)
-        rd['driver'] = driver.to_dict() if driver else None
-        rd['vehicle'] = vehicle.to_dict() if vehicle else None
-        results.append(rd)
-
-    results.sort(key=lambda x: x.get('departure_at', ''))
+    results.sort(key=lambda x: (
+        -(x.get('driver') or {}).get('rating_avg', 0),
+        -(x.get('driver') or {}).get('rating_count', 0),
+        x.get('departure_at', ''),
+    ))
     return jsonify(results)
 
 
@@ -116,8 +137,7 @@ def my_offered_rides(current_user):
     rides = Ride.query.filter_by(driver_id=driver).order_by(Ride.created_at.desc()).all()
     results = []
     for r in rides:
-        rd = r.to_dict()
-        rd['vehicle'] = Vehicle.query.get(r.vehicle_id).to_dict() if Vehicle.query.get(r.vehicle_id) else None
+        rd = _enrich_ride(r)
         bookings = Booking.query.filter(
             Booking.ride_id == r._id,
             Booking.status != 'cancelled'
@@ -135,43 +155,30 @@ def my_offered_rides(current_user):
 @rides_bp.route('/<rid>/start', methods=['PUT'])
 @require_auth
 def start_ride(current_user, rid):
-    _set_ride_and_bookings(rid, 'started', 'started')
+    _set_ride_and_bookings(rid, 'started', 'started', skip_booking_statuses=['cancelled'])
     return jsonify({'ok': True})
 
 
 @rides_bp.route('/<rid>/progress', methods=['PUT'])
 @require_auth
 def mark_in_progress(current_user, rid):
-    _set_ride_and_bookings(rid, 'in_progress', 'in_progress')
+    _set_ride_and_bookings(rid, 'in_progress', 'in_progress', skip_booking_statuses=['cancelled'])
     return jsonify({'ok': True})
 
 
 @rides_bp.route('/<rid>/complete', methods=['PUT'])
 @require_auth
 def complete_ride(current_user, rid):
-    ride = Ride.query.get(rid)
-    if ride:
-        ride.status = 'completed'
-        bookings = Booking.query.filter(
-            Booking.ride_id == rid,
-            ~Booking.status.in_(['cancelled', 'payment_completed'])
-        ).all()
-        for b in bookings:
-            b.status = 'payment_pending'
-        db.session.commit()
+    # Bookings that are already paid stay paid.
+    _set_ride_and_bookings(rid, 'completed', 'payment_pending',
+                           skip_booking_statuses=['cancelled', 'payment_completed'])
     return jsonify({'ok': True})
 
 
 @rides_bp.route('/<rid>/cancel', methods=['PUT'])
 @require_auth
 def cancel_ride(current_user, rid):
-    ride = Ride.query.get(rid)
-    if ride:
-        ride.status = 'cancelled'
-        bookings = Booking.query.filter_by(ride_id=rid).all()
-        for b in bookings:
-            b.status = 'cancelled'
-        db.session.commit()
+    _set_ride_and_bookings(rid, 'cancelled', 'cancelled', skip_booking_statuses=[])
     return jsonify({'ok': True})
 
 
@@ -187,16 +194,3 @@ def update_ride_route(current_user, rid):
     ride.duration_min = data.get('duration_min')
     db.session.commit()
     return jsonify(ride.to_dict())
-
-
-def _set_ride_and_bookings(ride_id, ride_status, booking_status):
-    ride = Ride.query.get(ride_id)
-    if ride:
-        ride.status = ride_status
-        bookings = Booking.query.filter(
-            Booking.ride_id == ride_id,
-            Booking.status != 'cancelled'
-        ).all()
-        for b in bookings:
-            b.status = booking_status
-        db.session.commit()

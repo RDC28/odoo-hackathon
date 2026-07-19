@@ -1,9 +1,10 @@
-﻿import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import * as api from '../api/api'
 import { fetchRoute } from '../api/geo'
 import MapView from '../components/MapView'
 import { useAuth } from '../context/AuthContext'
+import { statusLabel } from '../utils'
 
 // Live Trip Tracking. In the real system the driver's phone streams GPS over a
 // socket; here the movement is simulated along the actual OSRM route polyline.
@@ -15,8 +16,7 @@ export default function TrackRide() {
   const [coords, setCoords] = useState(null)
   const [progress, setProgress] = useState(0)
   const [running, setRunning] = useState(false)
-  const doneRef = useRef(false)
-  const startedAtRef = useRef(null)
+  const [simulationDone, setSimulationDone] = useState(false)
 
   useEffect(() => {
     (async () => {
@@ -35,26 +35,19 @@ export default function TrackRide() {
 
   useEffect(() => {
     if (!running) return
-    startedAtRef.current = startedAtRef.current || performance.now()
-    let frame
-    const tick = now => {
-      const elapsed = now - startedAtRef.current
-      // Prototype playback is accelerated to 90 seconds, while the marker
-      // still follows the real OSRM route geometry.
-      setProgress(Math.min(1, elapsed / 90000))
-      if (elapsed < 90000) frame = requestAnimationFrame(tick)
-    }
-    frame = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(frame)
+    // Simulated playback: the whole trip replays in 90 seconds, with the
+    // marker following the real OSRM route geometry below.
+    const timer = setInterval(() => setProgress(p => Math.min(1, p + 0.25 / 90)), 250)
+    return () => clearInterval(timer)
   }, [running])
 
   useEffect(() => {
-    if (progress >= 1 && running && b && !doneRef.current) {
-      doneRef.current = true
+    if (progress >= 1 && running) {
       setRunning(false)
-      api.completeRide(b.ride._id).then(() => api.getBooking(id).then(setB))
+      setProgress(0)
+      setSimulationDone(true)
     }
-  }, [progress, running, b, id])
+  }, [progress, running])
 
   if (!b || !b.ride) return <div className="page"><p className="muted">Loading…</p></div>
 
@@ -63,16 +56,14 @@ export default function TrackRide() {
   const driverPos = simulatedPos
   const effectiveProgress = progress
   const etaMin = Math.max(0, Math.ceil((1 - effectiveProgress) * duration))
-  // Also treat the ride's real status as "arrived" so revisiting this page after
-  // the trip already ended (e.g. after paying) shows the end state immediately,
-  // instead of resetting to 0% and letting the driver re-run the simulation
-  // (which would call completeRide again).
+  // A completed ride remains complete when revisiting this preview.
   const rideDone = b.ride.status === 'completed'
   const arrived = effectiveProgress >= 0.98 || rideDone
   const alreadyPaid = b.status === 'payment_completed'
 
   async function startSim() {
-    if (b.ride.status === 'started') await api.markInProgress(b.ride._id)
+    setSimulationDone(false)
+    setProgress(0)
     setRunning(true)
   }
 
@@ -85,7 +76,7 @@ export default function TrackRide() {
           ? <strong> Trip completed{alreadyPaid ? ' and paid' : ' — proceed to payment'}</strong>
           : running
             ? <strong>Coming in {etaMin} minutes</strong>
-            : <strong>Trip {b.ride.status.replace(/_/g, ' ')} — waiting for driver movement</strong>}
+            : <strong>Trip {statusLabel(b.ride.status)} — waiting for driver movement</strong>}
       </div>
       <div className="card">
         <MapView
@@ -104,7 +95,7 @@ export default function TrackRide() {
       </div>
       <div className="btn-row">
         {!running && !arrived && (
-          <button className="btn btn-primary" onClick={startSim}><span className="material-symbols-rounded">play_arrow</span> Simulate live trip (preview)</button>
+          <button className="btn btn-primary" onClick={startSim}><span className="material-symbols-rounded">play_arrow</span> {simulationDone ? 'Replay simulation' : 'Simulate live trip (preview)'}</button>
         )}
         {arrived && !alreadyPaid && (
           <button className="btn btn-primary" onClick={() => navigate(`/app/trips/${id}/pay`)}> Pay Now (₹ {b.fare})</button>
@@ -113,7 +104,7 @@ export default function TrackRide() {
         <button className="btn btn-outline" onClick={() => navigate(`/app/trips/${id}`)}>← Trip Detail</button>
       </div>
       <p className="muted">
-        The route preview is simulated for demonstration. Drivers and passengers see the same moving vehicle marker.
+        {simulationDone ? 'Simulation reset. Use Complete Trip in My Trips when the ride is actually finished.' : 'The route preview is visual only. Drivers and passengers see the same moving vehicle marker.'}
       </p>
     </div>
   )

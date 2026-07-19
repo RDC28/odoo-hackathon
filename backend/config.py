@@ -2,25 +2,13 @@ import os
 from pathlib import Path
 
 
-def load_local_env():
-    """Load simple KEY=VALUE pairs for local development.
-
-    Production deployments should provide real environment variables. This
-    keeps `python app.py` convenient without adding a dependency just for the
-    local test setup.
-    """
-    env_path = Path(__file__).with_name('.env')
-    if not env_path.exists():
-        return
-    for line in env_path.read_text(encoding='utf-8').splitlines():
-        line = line.strip()
-        if not line or line.startswith('#') or '=' not in line:
-            continue
-        key, value = line.split('=', 1)
-        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
-
-
-load_local_env()
+# Load KEY=VALUE pairs from the local .env file (no dotenv dependency needed).
+_env_file = Path(__file__).with_name('.env')
+if _env_file.exists():
+    for _line in _env_file.read_text(encoding='utf-8').splitlines():
+        if '=' in _line and not _line.strip().startswith('#'):
+            _key, _value = _line.split('=', 1)
+            os.environ.setdefault(_key.strip(), _value.strip().strip('"').strip("'"))
 
 class Config:
     SECRET_KEY = os.environ.get('SECRET_KEY', 'carpool-hackathon-secret-2026')

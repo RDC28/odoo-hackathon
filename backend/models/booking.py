@@ -1,4 +1,3 @@
-import json
 from models import db, gen_id, utcnow
 
 
@@ -8,28 +7,13 @@ class Booking(db.Model):
     ride_id = db.Column(db.String(36), db.ForeignKey('rides._id'), nullable=False)
     rider_id = db.Column(db.String(36), db.ForeignKey('users._id'), nullable=False)
     seats_booked = db.Column(db.Integer, nullable=False)
-    pickup_point_json = db.Column(db.Text, nullable=False)
-    drop_point_json = db.Column(db.Text, nullable=False)
+    pickup_point = db.Column(db.JSON, nullable=False)  # { address, lat, lng }
+    drop_point = db.Column(db.JSON, nullable=False)    # { address, lat, lng }
     fare = db.Column(db.Float, nullable=False)
+    # booked | started | in_progress | payment_pending | payment_completed | cancelled
     status = db.Column(db.String(30), default='booked')
     conversation_id = db.Column(db.String(36), nullable=True)
     created_at = db.Column(db.DateTime, default=utcnow)
-
-    @property
-    def pickup_point(self):
-        return json.loads(self.pickup_point_json) if self.pickup_point_json else None
-
-    @pickup_point.setter
-    def pickup_point(self, val):
-        self.pickup_point_json = json.dumps(val) if val else None
-
-    @property
-    def drop_point(self):
-        return json.loads(self.drop_point_json) if self.drop_point_json else None
-
-    @drop_point.setter
-    def drop_point(self, val):
-        self.drop_point_json = json.dumps(val) if val else None
 
     def to_dict(self):
         return {
